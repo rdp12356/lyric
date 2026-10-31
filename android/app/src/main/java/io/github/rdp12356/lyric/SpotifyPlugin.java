@@ -23,6 +23,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 /** Official Spotify App Remote. No Web API, client secret, or notification access. */
 @CapacitorPlugin(name = "Spotify")
 public class SpotifyPlugin extends Plugin {
+    private static final String DEFAULT_CLIENT_ID = "62946f0e6551422aa8d3a5627245ab54";
     private static final String REDIRECT = "http://127.0.0.1:43821/callback";
     private SpotifyAppRemote remote;
     private final AtomicBoolean connecting = new AtomicBoolean(false);
@@ -44,7 +45,7 @@ public class SpotifyPlugin extends Plugin {
         } catch (Exception ignored) { return ""; }
     }
     private JSObject status() {
-        JSObject result = new JSObject(); result.put("connected", remote != null && remote.isConnected()); result.put("clientId", prefs().getString("clientId", ""));
+        JSObject result = new JSObject(); result.put("connected", remote != null && remote.isConnected()); result.put("clientId", prefs().getString("clientId", DEFAULT_CLIENT_ID));
         result.put("packageName", getContext().getPackageName()); result.put("fingerprint", fingerprint()); result.put("redirectUri", REDIRECT); return result;
     }
     @PluginMethod public void getStatus(PluginCall call) { call.resolve(status()); }
@@ -156,7 +157,7 @@ public class SpotifyPlugin extends Plugin {
     }
     @Override protected void handleOnResume() {
         if (wantsConnection && !connecting.get() && (remote == null || !remote.isConnected())) {
-            String client = prefs().getString("clientId", ""); if (!client.isEmpty()) getActivity().runOnUiThread(() -> connectRemote(client, false, null));
+            String client = prefs().getString("clientId", DEFAULT_CLIENT_ID); if (!client.isEmpty()) getActivity().runOnUiThread(() -> connectRemote(client, false, null));
         }
     }
     @Override protected void handleOnStop() { if (remote != null && remote.isConnected()) dropConnection(); }

@@ -32,7 +32,7 @@ This version uses the **official Spotify Android App Remote SDK 0.8.0**, not Web
 2. Create an app in the [Spotify Developer Dashboard](https://developer.spotify.com/dashboard). Select **Android**. Web API and Web Playback SDK are not required for this route.
 3. Add the exact redirect URI `http://127.0.0.1:43821/callback`.
 4. In the developer app's Android configuration, register package `io.github.rdp12356.lyric` and the **SHA-1 signing fingerprint for the APK you install**. Find both in `spotify-android-setup.txt` or Lyric's Sources & settings screen.
-5. Enter the public Client ID in Lyric's **Sources & settings → Spotify app**, then tap **Connect Spotify** and authorize in Spotify. A client secret is not needed.
+5. Your public Client ID `62946f0e6551422aa8d3a5627245ab54` is prefilled in Lyric's **Sources & settings → Spotify app**. Tap **Connect Spotify** and authorize in Spotify. You can replace the Client ID to use a different registration; a client secret is not needed.
 6. Start your music in Spotify and return to Lyric. The native SDK reports the playing song, position, speed, artwork, and control restrictions.
 
 Spotify's SDK documentation describes reading PlayerState without Web API calls and restricts arbitrary-track URI playback to accounts with on-demand capability. Lyric does not invoke arbitrary-track playback. Whether a particular Free account/developer registration can connect, and which seek/skip operations it allows, must still be tested on the actual device. The app respects Spotify's reported restrictions; it does not bypass subscription requirements or ads. Web API development-mode Premium requirements and Web Playback SDK Premium requirements remain unchanged.
