@@ -131,7 +131,7 @@ export const TrackSearchModal: React.FC<TrackSearchModalProps> = ({
             </div>
           ) : (
             <div className="text-center py-12 text-white/40 text-xs">
-              {previewsOnly ? 'Search short audio previews. For full-song lyric sync, open a local file or connect your music player.' : 'Type a song or artist name above to find any track with synced lyrics!'}
+              {previewsOnly ? 'Search short audio previews. For full-song lyric sync, open a local audio file.' : 'Type a song or artist name above to find any track with synced lyrics!'}
             </div>
           )}
         </div>

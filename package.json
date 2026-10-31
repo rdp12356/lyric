@@ -16,7 +16,7 @@
     "build:dmg": "npm run build && electron-builder --mac dmg",
     "android:sync": "npm run build && cap sync android",
     "android:open": "cap open android",
-    "android:apk": "npm run android:sync && cd android && ./gradlew assembleDebug",
+    "android:apk": "npm run android:sync && cd android && ./gradlew assembleLocalDebug",
     "test:android-ui": "node tests/android-smoke.cjs && node tests/android-media-smoke.cjs"
   },
   "build": {

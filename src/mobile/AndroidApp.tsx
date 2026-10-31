@@ -21,7 +21,8 @@ export default function AndroidApp() {
   const [duration, setDuration] = useState(0);
   const [lyrics, setLyrics] = useState<LyricsData | null>(null);
   const [loading, setLoading] = useState(false);
-  const [source, setSource] = useState<'device' | 'local'>(isAndroid ? 'device' : 'local');
+  const [source, setSource] = useState<'device' | 'local'>('local');
+  const [supportsMusicSync, setSupportsMusicSync] = useState(false);
   const [permission, setPermission] = useState(false);
   const [settings, setSettings] = useState(false);
   const [search, setSearch] = useState(false);
@@ -39,6 +40,17 @@ export default function AndroidApp() {
   trackRef.current = track;
   const importedLyrics = useRef(false);
   const localUrl = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (!isAndroid) return;
+    let cancelled = false;
+    void AndroidMedia.getCapabilities().then(capabilities => {
+      if (cancelled) return;
+      setSupportsMusicSync(capabilities.musicPlayerSync);
+      if (capabilities.musicPlayerSync && !trackRef.current) setSource('device');
+    }).catch(() => { /* Local playback remains available without the native bridge. */ });
+    return () => { cancelled = true; };
+  }, []);
 
   const sync = (pos: number, active: boolean) => {
     sample.current = { position: pos, at: performance.now(), playing: active };
@@ -217,7 +229,7 @@ export default function AndroidApp() {
     {track?.albumArt && <BlurredCoverBackground coverUrl={track.albumArt} />}
     <AmbientRimLights config={rim} palette={palette} audioEnergy={energy} isPlaying={playing} />
     <header className="mobile-header">
-      <div><span className="mobile-brand">lyric<span>✦</span></span><span className="mobile-source">{source === 'device' ? 'Listening to your player' : 'Your music, in motion'}</span></div>
+      <div><span className="mobile-brand">lyric<span>✦</span></span><span className="mobile-source">{source === 'device' ? 'Listening to your player' : isAndroid && !supportsMusicSync ? 'Local edition · no notification access' : 'Your music, in motion'}</span></div>
       <div className="mobile-actions">
         <button aria-label="Toggle ambient lighting" aria-pressed={rim.enabled} onClick={() => setRim(r => ({ ...r, enabled: !r.enabled }))}><Sun size={21} opacity={rim.enabled ? 1 : 0.4} /></button>
         <button aria-label="Sources and settings" onClick={() => setSettings(true)}><Settings2 size={21} /></button>
@@ -245,10 +257,10 @@ export default function AndroidApp() {
     <TrackSearchModal isOpen={search} previewsOnly onClose={() => setSearch(false)} onSelectTrack={t => void selectTrack(t)} />
     {settings && <div className="mobile-scrim" onClick={() => setSettings(false)}><section role="dialog" aria-modal="true" aria-labelledby="sources-title" className="mobile-sheet glass-panel" onClick={e => e.stopPropagation()}>
       <div className="mobile-sheet-heading"><h2 id="sources-title">Sources & settings</h2><button aria-label="Close settings" onClick={() => setSettings(false)}><X size={22} /></button></div>
-      {isAndroid && <div className="mobile-source-option"><Smartphone size={23} /><div><strong>Music player</strong><p>Read song details and control active media sessions. Notification access is optional; other notification content is not read.</p><button className="mobile-secondary" onClick={async () => { try { await AndroidMedia.openSettings(); switchSource('device'); setSettings(false); } catch { setError('Could not open Android settings. Enable Lyric in Notification access.'); } }}>Enable notification access</button>{source !== 'device' && <button className="mobile-text-button" onClick={() => { switchSource('device'); setSettings(false); }}>Listen to music player</button>}</div></div>}
+      {supportsMusicSync && <div className="mobile-source-option"><Smartphone size={23} /><div><strong>Music player</strong><p>Read song details and control active media sessions. Notification access is optional; other notification content is not read.</p><button className="mobile-secondary" onClick={async () => { try { await AndroidMedia.openSettings(); switchSource('device'); setSettings(false); } catch { setError('Could not open Android settings. Enable Lyric in Notification access.'); } }}>Enable notification access</button>{source !== 'device' && <button className="mobile-text-button" onClick={() => { switchSource('device'); setSettings(false); }}>Listen to music player</button>}</div></div>}
       <div className="mobile-source-option"><Upload size={23} /><div><strong>Local audio</strong><p>Choose a song from your phone. Use “Artist - Title” filenames for better lyric matches. Playback stays inside Lyric.</p><button className="mobile-secondary" onClick={() => { setSettings(false); fileInput.current?.click(); }}>Choose audio file</button></div></div>
       {track && <div className="mobile-source-option"><MessageSquare size={23} /><div><strong>Your lyrics</strong><p>Import an LRC file for offline lyrics or a different version of this song.</p><button className="mobile-secondary" onClick={() => lrcInput.current?.click()}>Import LRC lyrics</button>{source === 'local' && <><label>Song title<input value={track.title} onChange={e => setTrack({ ...track, title: e.target.value })} /></label><label>Artist<input value={track.artist} onChange={e => setTrack({ ...track, artist: e.target.value })} /></label></>}</div></div>}
-      <p className="mobile-note">Catalog search plays short previews. For full songs, use a music player or a local file. Word timing is estimated from lyric line timestamps. Ambient lighting stays inside this app.</p>
+      <p className="mobile-note">Catalog search plays short previews. {supportsMusicSync ? 'For full songs, use a music player or a local file.' : 'For full songs, open a local audio file.'} Word timing is estimated from lyric line timestamps. Ambient lighting stays inside this app.</p>
     </section></div>}
   </div>;
 }

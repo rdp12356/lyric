@@ -14,6 +14,7 @@ export interface AndroidPlayback {
 }
 
 interface AndroidMediaPlugin {
+  getCapabilities(): Promise<{ musicPlayerSync: boolean }>;
   getPlayback(): Promise<AndroidPlayback>;
   openSettings(): Promise<void>;
   control(options: { action: 'play-pause' | 'next' | 'previous' | 'seek'; position?: number }): Promise<void>;

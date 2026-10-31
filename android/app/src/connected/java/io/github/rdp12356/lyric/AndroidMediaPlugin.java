@@ -29,6 +29,7 @@ public class AndroidMediaPlugin extends Plugin {
     }
 
     private boolean hasAccess() {
+        if (!BuildConfig.MEDIA_SYNC_ENABLED) return false;
         String enabled = Settings.Secure.getString(getContext().getContentResolver(), "enabled_notification_listeners");
         if (enabled == null) return false;
         for (String value : enabled.split(":")) {
@@ -111,7 +112,18 @@ public class AndroidMediaPlugin extends Plugin {
     }
 
     @PluginMethod
+    public void getCapabilities(PluginCall call) {
+        JSObject result = new JSObject();
+        result.put("musicPlayerSync", BuildConfig.MEDIA_SYNC_ENABLED);
+        call.resolve(result);
+    }
+
+    @PluginMethod
     public void openSettings(PluginCall call) {
+        if (!BuildConfig.MEDIA_SYNC_ENABLED) {
+            call.reject("Music-player sync is not included in the local edition");
+            return;
+        }
         try {
             Intent intent = new Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS);
             getActivity().startActivity(intent);
