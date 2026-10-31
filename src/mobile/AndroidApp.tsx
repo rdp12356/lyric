@@ -34,6 +34,7 @@ export default function AndroidApp() {
   const [lyrics, setLyrics] = useState<LyricsData | null>(null);
   const [loading, setLoading] = useState(false);
   const [lyricsIssue, setLyricsIssue] = useState('');
+  const [lyricsRetryToken, setLyricsRetryToken] = useState(0);
   const [source, setSource] = useState<Source>('local');
   const [supportsMusicSync, setSupportsMusicSync] = useState(false);
   const [permission, setPermission] = useState(false);
@@ -205,7 +206,7 @@ export default function AndroidApp() {
         });
     }, 250);
     return () => { cancelled = true; clearTimeout(timer); };
-  }, [track?.id, track?.title, track?.artist, duration]);
+  }, [track?.id, track?.title, track?.artist, duration, lyricsRetryToken]);
   const stopMic = useCallback(() => { if (isAndroid) void AudioInput.stop().catch(() => {}); else microphone.current.stop(); micEnergy.current = SILENCE; setMicActive(false); }, []);
   useEffect(() => {
     if (!micActive || !isAndroid) return;
@@ -236,6 +237,29 @@ export default function AndroidApp() {
     el.src = next.audioUrl; el.load(); visualizerEngine.resume();
     try { await el.play(); } catch { setError('Tap Play to start this track.'); }
   };
+  // Alternative lyrics must not replace the connected Spotify/Android playback source.
+  const selectSearchResult = async (candidate: Track) => {
+    if (!searchForLyrics || (source !== 'spotify' && source !== 'device') || !trackRef.current) {
+      await selectTrack(candidate, searchForLyrics);
+      return;
+    }
+    const original = trackRef.current;
+    setLyricsIssue(''); setLoading(true);
+    const result = await lookupLyricsFromLRCLIB(candidate.title, candidate.artist, candidate.album, candidate.duration)
+      .catch(() => ({ lyrics: null }));
+    if (trackRef.current?.id !== original.id) return;
+    if (result.lyrics) {
+      importedLyrics.current = true;
+      const selected = { ...result.lyrics, source: result.lyrics.source + ' (selected version)' };
+      setLyrics(selected);
+      cacheLyrics(lyricsKey(original.title, original.artist, original.album, original.duration), selected);
+      setLyricsIssue('');
+    } else {
+      setLyricsIssue('No lyrics found for that version. Try another version or import a synced LRC file.');
+    }
+    setLoading(false);
+  };
+
   const control = async (action: 'play-pause' | 'next' | 'previous') => {
     setError('');
     if (source === 'spotify' || source === 'device') {
@@ -334,7 +358,7 @@ export default function AndroidApp() {
         {isAndroid && <button className="mobile-secondary" onClick={() => setSettings(true)}><Radio size={17}/> Connect music</button>}
         <button className="mobile-text-button" onClick={() => { setQueue(DEMO_TRACKS); void selectTrack(DEMO_TRACKS[0]); }}>Try a song preview</button>
         <button className="mobile-text-button" onClick={() => openSearch(true)}>Find lyrics for another player</button>
-      </div> : loading && !lyrics ? <div className="mobile-welcome"><Music2 className="animate-pulse" size={32}/><p>Finding the words…</p></div> : <SyncedLyricsView lyrics={lyrics} currentTime={Math.max(0, position + offset / 1000)} duration={duration} palette={activePalette} style={prefs.style} unavailableMessage={lyricsIssue} onSeek={s => void seek(s)} onSearchOpen={() => openSearch(source !== 'local')} />}
+      </div> : loading && !lyrics ? <div className="mobile-welcome"><Music2 className="animate-pulse" size={32}/><p>Finding the words…</p></div> : <SyncedLyricsView lyrics={lyrics} currentTime={Math.max(0, position + offset / 1000)} duration={duration} palette={activePalette} style={prefs.style} unavailableMessage={lyricsIssue} onRetry={() => { setLyricsIssue(''); setLyricsRetryToken(value => value + 1); }} onSeek={s => void seek(s)} onSearchOpen={() => openSearch(source !== 'local')} />}
     </main>
     {error && <div className="mobile-error" role="alert"><span>{error}</span><button aria-label="Dismiss error" onClick={() => setError('')}><X size={18}/></button></div>}
     {track && !focus && <section className="mobile-player glass-panel" aria-label="Music player">
@@ -347,7 +371,7 @@ export default function AndroidApp() {
     {focus && <button className="mobile-show-player glass-pill" onClick={() => setFocus(false)}><Minimize2 size={16}/> Show player</button>}
     <input aria-label="Audio file" ref={fileInput} type="file" accept="audio/*" multiple hidden onChange={e => { const files = Array.from(e.target.files || []); const tracks = files.map(createTrackFromFile); tracks.forEach(t => t.audioUrl && urls.current.add(t.audioUrl)); if (tracks.length) { setQueue(items => [...items, ...tracks]); void selectTrack(tracks[0]); } e.target.value = ''; }}/>
     <input aria-label="LRC lyrics file" ref={lrcInput} type="file" accept=".lrc,text/plain" hidden onChange={e => { const f = e.target.files?.[0]; if (f) void loadLrc(f); e.target.value = ''; }}/>
-    <TrackSearchModal isOpen={search} previewsOnly lyricsOnly={searchForLyrics} onClose={() => setSearch(false)} onSelectTrack={t => void selectTrack(t, searchForLyrics)}/>
+    <TrackSearchModal isOpen={search} previewsOnly lyricsOnly={searchForLyrics} onClose={() => setSearch(false)} onSelectTrack={t => void selectSearchResult(t)}/>
     {queueOpen && <Sheet title="Your queue" onClose={closeQueue}><p className="mobile-note">Add multiple audio files. Files remain available while the app is open.</p><button className="mobile-primary" onClick={() => fileInput.current?.click()}><Upload size={17}/> Add songs</button><label className="mobile-switch">Repeat queue<input type="checkbox" checked={repeat} onChange={e => setRepeat(e.target.checked)}/></label>{queue.length ? queue.map((item, index) => <button key={`${item.id}-${index}`} className={`mobile-queue-row ${track?.id === item.id ? 'active' : ''}`} onClick={() => { void selectTrack(item); setQueueOpen(false); }}><span>{String(index+1).padStart(2,'0')}</span><div><strong>{item.title}</strong><small>{item.artist}</small></div>{track?.id === item.id && <Music2 size={18}/>}</button>) : <p className="mobile-note">Your queue is empty. Choose a few songs to start listening.</p>}</Sheet>}
     {calibration && <Sheet title="Lyric calibration" onClose={closeCalibration}><p className="mobile-note">Tap a line exactly when you hear its first word. Calibration is saved for this song. Word timings are estimated unless your LRC contains word timestamps.</p><div className="mobile-calibration"><button onClick={() => changeOffset(offset - 50)}>−50ms</button><strong>{offset > 0 ? '+' : ''}{offset}ms</strong><button onClick={() => changeOffset(offset + 50)}>+50ms</button></div><button className="mobile-secondary" onClick={() => changeOffset(0)}>Reset calibration</button>{source !== 'local' && source !== 'manual' && <p className="mobile-note">Last API round trip: {latency}ms. Updates: {source === 'spotify' ? 'about every 350ms' : 'about every 300ms'}; the lyric clock advances between updates.</p>}<div className="mobile-calibration-lines">{lyrics?.lines.map(line => <button key={line.id} className={position + offset/1000 >= line.time && position + offset/1000 < line.endTime ? 'active' : ''} onClick={() => changeOffset((line.time - position) * 1000)}><span>{time(line.time)}</span>{line.text || 'Instrumental'}</button>)}</div></Sheet>}
     {settings && <Sheet title="Sources & settings" onClose={closeSettings}>
