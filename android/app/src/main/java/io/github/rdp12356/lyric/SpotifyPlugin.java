@@ -32,6 +32,7 @@ public class SpotifyPlugin extends Plugin {
     private Subscription<PlayerState> subscription;
     private volatile PlayerState latest;
     private int generation;
+    private volatile PluginCall pendingLogin;
     private final Handler handler = new Handler(Looper.getMainLooper());
     private android.content.SharedPreferences prefs() { return getContext().getSharedPreferences("spotify.remote", 0); }
     @SuppressWarnings("deprecation")
@@ -46,18 +47,20 @@ public class SpotifyPlugin extends Plugin {
     }
     private JSObject status() {
         JSObject result = new JSObject(); result.put("connected", remote != null && remote.isConnected()); result.put("clientId", prefs().getString("clientId", DEFAULT_CLIENT_ID));
-        result.put("packageName", getContext().getPackageName()); result.put("fingerprint", fingerprint()); result.put("redirectUri", REDIRECT); return result;
+        result.put("spotifyInstalled", SpotifyAppRemote.isSpotifyInstalled(getContext())); result.put("packageName", getContext().getPackageName()); result.put("fingerprint", fingerprint()); result.put("redirectUri", REDIRECT); return result;
     }
     @PluginMethod public void getStatus(PluginCall call) { call.resolve(status()); }
     @PluginMethod public void connect(PluginCall call) {
         String clientId = call.getString("clientId", "").trim();
         if (!clientId.matches("[a-fA-F0-9]{32}")) { call.reject("Enter the 32-character public Spotify Client ID"); return; }
+        if (!SpotifyAppRemote.isSpotifyInstalled(getContext())) { call.reject("The official Spotify Android app was not detected. Install Spotify (not Spotify Lite), open it, sign in, and play a song before connecting."); return; }
         prefs().edit().putString("clientId", clientId).apply(); wantsConnection = true;
         getActivity().runOnUiThread(() -> connectRemote(clientId, true, call));
     }
     private void connectRemote(String clientId, boolean showAuth, PluginCall call) {
         if (!connecting.compareAndSet(false, true)) { if (call != null) call.reject("Spotify connection is already in progress"); return; }
         if (remote != null && remote.isConnected()) { connecting.set(false); if (call != null) call.resolve(status()); return; }
+        pendingLogin = call;
         int attempt = ++generation;
         Runnable timeout = () -> { if (attempt == generation && connecting.getAndSet(false)) { generation++; if (call != null) call.reject("Spotify connection timed out. Check the app registration, package name, and signing fingerprint."); } };
         handler.postDelayed(timeout, 60000);
@@ -66,7 +69,7 @@ public class SpotifyPlugin extends Plugin {
             SpotifyAppRemote.connect(getActivity(), params, new Connector.ConnectionListener() {
                 @Override public void onConnected(SpotifyAppRemote value) {
                     if (attempt != generation || !wantsConnection) { SpotifyAppRemote.disconnect(value); return; }
-                    handler.removeCallbacks(timeout); remote = value; connecting.set(false);
+                    handler.removeCallbacks(timeout); pendingLogin = null; remote = value; connecting.set(false);
                     subscription = remote.getPlayerApi().subscribeToPlayerState();
                     subscription.setEventCallback(state -> latest = state);
                     subscription.setErrorCallback(error -> latest = null);
@@ -74,7 +77,7 @@ public class SpotifyPlugin extends Plugin {
                 }
                 @Override public void onFailure(Throwable error) {
                     if (attempt != generation) return;
-                    handler.removeCallbacks(timeout); connecting.set(false); remote = null;
+                    handler.removeCallbacks(timeout); pendingLogin = null; connecting.set(false); remote = null;
                     if (call != null) call.reject("Spotify connection failed (" + error.getClass().getSimpleName() + "). Check that Spotify is installed, your Client ID is registered for Android, and the package name and SHA-1 match this APK.");
                 }
             });
@@ -86,6 +89,8 @@ public class SpotifyPlugin extends Plugin {
     }
     @PluginMethod public void disconnect(PluginCall call) {
         wantsConnection = false; generation++; connecting.set(false);
+        PluginCall pending = pendingLogin; pendingLogin = null;
+        if (pending != null) pending.reject("Spotify connection cancelled");
         getActivity().runOnUiThread(() -> { dropConnection(); call.resolve(); });
     }
     private void onMain(PluginCall call, Runnable action) {

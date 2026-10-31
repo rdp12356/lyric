@@ -26,7 +26,7 @@ await local.addInitScript(()=>{
   if(plugin==='AndroidMedia')return {musicPlayerSync:false};
   if(plugin==='Spotify'){
    if(method==='getStatus')return {connected:false,clientId:'',packageName:'io.github.rdp12356.lyric',fingerprint:'AA:BB:CC'};
-   if(method==='connect')return {connected:true,clientId:options.clientId};
+   if(method==='connect'){if(options.clientId==='f'.repeat(32))throw new Error('Spotify test connection rejected');if(options.clientId==='a'.repeat(32))return new Promise(()=>{});return {connected:true,clientId:options.clientId};}
    if(method==='getPlayback')return window.spotifyFixture;
    if(method==='control'){if(options.action==='play-pause')window.spotifyFixture.playing=!window.spotifyFixture.playing;if(options.action==='seek')window.spotifyFixture.position=options.position;}
   }
@@ -37,6 +37,8 @@ await local.route('https://lrclib.net/**',r=>r.fulfill({json:{id:2,trackName:'Sp
 await local.goto('http://127.0.0.1:5173/');
 await local.getByRole('button',{name:'Sources and settings'}).click();
 assert.equal(await local.getByRole('button',{name:'Enable notification access'}).count(),0);
+await local.getByLabel('Public Client ID').fill('f'.repeat(32));await local.getByRole('button',{name:'Connect Spotify',exact:true}).click();await local.getByRole('dialog').getByText('Spotify test connection rejected',{exact:true}).waitFor();
+await local.getByLabel('Public Client ID').fill('a'.repeat(32));await local.getByRole('button',{name:'Connect Spotify',exact:true}).click();await local.getByRole('button',{name:'Cancel login'}).click();await local.getByRole('button',{name:'Connect Spotify',exact:true}).waitFor();
 await local.getByLabel('Public Client ID').fill('0123456789abcdef0123456789abcdef');await local.getByRole('button',{name:'Connect Spotify',exact:true}).click();
 await local.getByText('Spotify Song',{exact:true}).waitFor();
 await local.getByRole('button',{name:'Pause',exact:true}).click();await local.getByRole('button',{name:'Play',exact:true}).waitFor();
