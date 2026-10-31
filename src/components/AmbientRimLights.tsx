@@ -6,21 +6,23 @@ interface AmbientRimLightsProps {
   palette: ColorPalette;
   audioEnergy: { bass: number; mid: number; treble: number; overall: number; beat?: number };
   isPlaying: boolean;
+  reducedEffects?: boolean;
 }
 
 export const AmbientRimLights: React.FC<AmbientRimLightsProps> = ({
   config,
   palette,
   audioEnergy,
-  isPlaying
+  isPlaying,
+  reducedEffects = false
 }) => {
   if (!config.enabled) return null;
 
   // Dynamic beat multiplier based on audio FFT and reactivity slider
   const beatScale = isPlaying ? 1 + config.beatReactivity * (audioEnergy.bass * 1.1 + (audioEnergy.beat || 0) * 0.4) : 1;
 
-  const effectiveThickness = Math.max(2, Math.round(config.thickness * (isPlaying ? 0.9 + audioEnergy.overall * 0.3 : 1.0)));
-  const effectiveBlur = Math.round(config.blur * beatScale);
+  const effectiveThickness = Math.max(2, Math.round(Math.min(config.thickness, reducedEffects ? 13 : 48) * (isPlaying ? 0.9 + audioEnergy.overall * 0.3 : 1.0)));
+  const effectiveBlur = Math.round(Math.min(config.blur * beatScale, reducedEffects ? 24 : 180));
   const effectiveOpacity = Math.min(1.0, config.intensity * (config.mode === 'static' ? 0.55 : isPlaying ? 0.08 + audioEnergy.overall * 0.8 + audioEnergy.bass * 0.45 + (audioEnergy.beat || 0) * 0.25 : 0.12));
 
   // Mode-specific styles
@@ -28,6 +30,13 @@ export const AmbientRimLights: React.FC<AmbientRimLightsProps> = ({
     const cAccent = palette.accent;
     const cSecondary = palette.secondary;
     const cDominant = palette.dominant;
+
+    // The regular multi-layer inset shadows are expensive on mobile GPUs.
+    if (reducedEffects) return {
+      boxShadow: `inset 0 0 ${effectiveBlur}px ${effectiveThickness}px ${cAccent}`,
+      opacity: Math.min(0.7, effectiveOpacity),
+      transition: 'opacity 0.14s ease-out'
+    };
 
     switch (config.mode) {
       case 'pulse':
@@ -97,7 +106,7 @@ export const AmbientRimLights: React.FC<AmbientRimLightsProps> = ({
     >
       {/* Perimeter Rim Light Layer (Synchronized Audio Visualizer) */}
       <div
-        className={`absolute inset-0 ${config.mode === 'aurora' ? 'animate-aurora' : ''}`}
+        className={`absolute inset-0 ${!reducedEffects && config.mode === 'aurora' ? 'animate-aurora' : ''}`}
         style={glowStyle}
       />
 

@@ -17,7 +17,7 @@
     "android:sync": "npm run build && cap sync android",
     "android:open": "cap open android",
     "android:apk": "npm run android:sync && cd android && ./gradlew assembleLocalDebug",
-    "test:android-ui": "node tests/sync-audio.cjs && node tests/android-smoke.cjs && node tests/android-media-smoke.cjs && node tests/spotify-reconnect-smoke.cjs && node tests/android-ux-smoke.cjs",
+    "test:android-ui": "node tests/run-android-ui.cjs",
     "test:sync": "node tests/sync-audio.cjs"
   },
   "build": {

@@ -3,13 +3,14 @@ export interface MobilePreferences {
   style: LyricStyle;
   rim: RimLightConfig;
   sensitivity: number;
+  graphicsMode: 'smooth' | 'cinematic';
   preferredPlayer: string;
   offsets: Record<string, number>;
 }
 const defaults: MobilePreferences = {
   style: 'smooth-captions',
   rim: { enabled: true, mode: 'pulse', thickness: 8, blur: 30, intensity: 0.85, beatReactivity: 0.8, palettePreset: 'album-art' },
-  sensitivity: 1.5, preferredPlayer: 'com.spotify.music', offsets: {},
+  sensitivity: 1.5, graphicsMode: 'smooth', preferredPlayer: 'com.spotify.music', offsets: {},
 };
 export function readPreferences(): MobilePreferences {
   try {

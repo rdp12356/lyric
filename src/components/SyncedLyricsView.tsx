@@ -15,7 +15,7 @@ interface SyncedLyricsViewProps {
   onRetry?: () => void;
 }
 
-export const SyncedLyricsView: React.FC<SyncedLyricsViewProps> = ({
+const SyncedLyricsViewComponent: React.FC<SyncedLyricsViewProps> = ({
   lyrics,
   currentTime,
   palette,
@@ -192,23 +192,19 @@ export const SyncedLyricsView: React.FC<SyncedLyricsViewProps> = ({
                 const isPast = currentTime >= w.end;
 
                 return (
-                  <motion.span
+                  <span
                     key={wIdx}
-                    animate={{
-                      scale: isCurrent ? 1.15 : 1.0,
-                      color: isCurrent ? '#ffffff' : isPast ? '#ffffff' : 'rgba(255, 255, 255, 0.25)'
+                    style={{
+                      transform: isCurrent ? 'translate3d(0,-2px,0) scale(1.1)' : 'translate3d(0,0,0) scale(1)',
+                      color: isCurrent || isPast ? '#ffffff' : 'rgba(255,255,255,0.25)',
+                      transition: 'transform 150ms cubic-bezier(0.2,0.75,0.3,1), color 150ms ease'
                     }}
-                    transition={{ type: 'spring', stiffness: 450, damping: 25 }}
-                    className={`inline-block font-black transition-all duration-75 ${
-                      isCurrent
-                        ? 'drop-shadow-[0_0_25px_rgba(255,255,255,0.95)] text-white'
-                        : isPast
-                        ? 'text-white'
-                        : 'text-white/25'
+                    className={`inline-block font-black ${
+                      isCurrent ? 'drop-shadow-[0_0_14px_rgba(255,255,255,0.6)]' : ''
                     }`}
                   >
                     {w.word}
-                  </motion.span>
+                  </span>
                 );
               })
             ) : (
@@ -240,3 +236,36 @@ function isInstrumentalLine(text: string): boolean {
   const clean = text.trim();
   return clean === '♪' || clean === '♫' || /^\[(instrumental|solo)\]$/i.test(clean) || clean === '...';
 }
+
+
+// The position slider refreshes frequently, but the words only change at their
+// timestamp boundaries. Avoid re-rendering Framer Motion trees ~30 times/sec
+// when the visible lyric content has not changed.
+function visibleMoment(lyrics: LyricsData | null, seconds: number): string {
+  if (!lyrics || lyrics.lines.length === 0) return 'empty';
+  const lines = lyrics.lines;
+  let lo = 0, hi = lines.length - 1, index = -1;
+  while (lo <= hi) {
+    const mid = (lo + hi) >>> 1;
+    if (seconds >= lines[mid].time) { index = mid; lo = mid + 1; }
+    else hi = mid - 1;
+  }
+  if (index < 0) return 'prelude';
+  const words = lines[index].words || [];
+  if (!words.length) return String(index);
+  let seen = -1;
+  let past = 0;
+  for (let i = 0; i < words.length; i++) {
+    if (seconds >= words[i].start) seen = i;
+    if (seconds >= words[i].end) past++;
+  }
+  return index + ':' + seen + ':' + past;
+}
+export const SyncedLyricsView = React.memo(SyncedLyricsViewComponent, (before, after) => (
+  before.lyrics === after.lyrics &&
+  before.duration === after.duration &&
+  before.palette === after.palette &&
+  before.style === after.style &&
+  before.unavailableMessage === after.unavailableMessage &&
+  visibleMoment(before.lyrics, before.currentTime) === visibleMoment(after.lyrics, after.currentTime)
+));

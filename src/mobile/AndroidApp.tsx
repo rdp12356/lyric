@@ -4,7 +4,7 @@ import { AmbientRimLights } from '../components/AmbientRimLights';
 import { BlurredCoverBackground } from '../components/BlurredCoverBackground';
 import { SyncedLyricsView } from '../components/SyncedLyricsView';
 import { TrackSearchModal } from '../components/TrackSearchModal';
-import { AndroidMedia, isAndroid } from '../services/androidMedia';
+import { AndroidMedia, isAndroid, type AndroidPlayback } from '../services/androidMedia';
 import { Spotify } from '../services/spotify';
 import { AudioInput, WebMicrophone } from '../services/audioInput';
 import { createTrackFromFile, DEMO_TRACKS, visualizerEngine } from '../services/audioManager';
@@ -81,6 +81,7 @@ export default function AndroidApp() {
   const fileInput = useRef<HTMLInputElement>(null);
   const lrcInput = useRef<HTMLInputElement>(null);
   const importedLyrics = useRef(false);
+  const eventRevision = useRef(0);
   const rim = prefs.rim;
   const activePalette = rim.palettePreset === 'album-art' ? palette : PRESET_PALETTES[rim.palettePreset] || palette;
 
@@ -176,7 +177,14 @@ export default function AndroidApp() {
       if (now - lastEnergy >= 60) {
         const local = sourceRef.current === 'local';
         const input = micActive ? (isAndroid ? micEnergy.current : microphone.current.energy()) : local && playingRef.current ? visualizerEngine.getMeasuredEnergy() : SILENCE;
-        setEnergy(envelope.current.update(input, now, prefsRef.current.sensitivity));
+        const nextEnergy = envelope.current.update(input, now, prefsRef.current.sensitivity);
+        setEnergy(previous => {
+          const maxChange = Math.max(
+            Math.abs(previous.bass - nextEnergy.bass), Math.abs(previous.mid - nextEnergy.mid),
+            Math.abs(previous.treble - nextEnergy.treble), Math.abs(previous.overall - nextEnergy.overall)
+          );
+          return maxChange > 0.012 || previous.beat !== nextEnergy.beat ? nextEnergy : previous;
+        });
         lastEnergy = now;
       }
       frame = requestAnimationFrame(tick);
@@ -184,6 +192,62 @@ export default function AndroidApp() {
     frame = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(frame);
   }, [duration, micActive]);
+  const applyPlayback = useCallback((state: AndroidPlayback, player: 'spotify' | 'device', transportMs: number) => {
+    if (sourceRef.current !== player) return;
+    setPermission(state.permissionGranted);
+    if (state.players) setPlayers(state.players);
+    if (state.active && state.title) {
+      const trackId = `${player}:${state.packageName}:${state.trackId || [state.title, state.artist, state.album, Math.round(state.duration || 0)].join('|')}`;
+      const changed = trackRef.current?.id !== trackId;
+      if (changed) {
+        importedLyrics.current = false;
+        setError(''); setLyrics(null); setLyricsIssue('');
+        const next: Track = {
+          id: trackId, title: state.title, artist: state.artist || '',
+          album: state.album || '', albumArt: state.artwork || '',
+          duration: state.duration || 0, position: state.position || 0,
+          source: player === 'spotify' ? 'spotify-web' : 'android-media',
+          isPlaying: !!state.playing
+        };
+        trackRef.current = next;
+        setTrack(next);
+      } else if (state.artwork && trackRef.current?.albumArt !== state.artwork) {
+        trackRef.current = { ...trackRef.current!, albumArt: state.artwork };
+        setTrack(trackRef.current);
+      }
+      setDuration(state.duration || 0);
+      setCanSeek(state.canSeek !== false);
+      if (changed) clock.current.reset(state.position || 0, !!state.playing, state.speed ?? 1);
+      else clock.current.update(state.position || 0, !!state.playing, state.speed ?? 1, transportMs);
+      setPlaying(!!state.playing);
+      setPosition(clock.current.now());
+    } else {
+      // Spotify may briefly report an empty track between songs; never retain stale lyrics.
+      trackRef.current = null;
+      setTrack(null); setLyrics(null); setDuration(0);
+      clock.current.reset(0, false); setPlaying(false); setPosition(0);
+    }
+  }, []);
+
+  // Native Spotify state subscription updates song changes and pause/play immediately.
+  // Periodic polling below remains as a safety net for artwork and position drift.
+  useEffect(() => {
+    if (!isAndroid || source !== 'spotify' || !spotifyConnected) return;
+    let cancelled = false;
+    let listener: { remove(): Promise<void> } | null = null;
+    try {
+      void Spotify.addListener('playerState', state => {
+        if (cancelled || document.hidden) return;
+        eventRevision.current++;
+        applyPlayback(state, 'spotify', 0);
+      }).then(handle => {
+        if (cancelled) void handle.remove();
+        else listener = handle;
+      }).catch(() => { /* Older APKs still work using the polling fallback. */ });
+    } catch { /* Browser-only test environments may not implement native listeners. */ }
+    return () => { cancelled = true; if (listener) void listener.remove(); };
+  }, [source, spotifyConnected, applyPlayback]);
+
   useEffect(() => {
     if (source !== 'device' && source !== 'spotify') return;
     if (source === 'spotify' && !spotifyConnected) return;
@@ -192,33 +256,44 @@ export default function AndroidApp() {
     audio.current?.pause();
     const poll = async () => {
       if (cancelled || document.hidden || inFlight) return;
-      inFlight = true; let delay = source === 'spotify' ? 800 : 600;
+      inFlight = true;
+      const revisionBeforeRequest = eventRevision.current;
+      let delay = source === 'spotify' ? 1400 : 650;
       try {
-        const before = performance.now();
-        const state = source === 'spotify' ? await Spotify.getPlayback() : await AndroidMedia.getPlayback({ packageName: prefs.preferredPlayer });
+        const started = performance.now();
+        const state = source === 'spotify'
+          ? await Spotify.getPlayback()
+          : await AndroidMedia.getPlayback({ packageName: prefs.preferredPlayer });
         if (cancelled) return;
-        const roundtrip = performance.now() - before; setLatency(Math.round(roundtrip));
-        if (state.retryAfterMs) { delay = Math.max(1500, state.retryAfterMs); setError('Spotify is rate-limiting updates. Waiting before retrying.'); return; }
-        failures = 0; setPermission(state.permissionGranted); setPlayers(state.players || []);
-        if (state.active && state.title) {
-          const id = `${source}:${state.packageName}:${state.trackId || [state.title,state.artist,state.album,Math.round(state.duration || 0)].join("|")}`;
-          const changed = trackRef.current?.id !== id;
-          if (changed) {
-            importedLyrics.current = false; setError(''); setLyrics(null);
-            setTrack({ id, title: state.title, artist: state.artist || '', album: state.album || '', albumArt: state.artwork || '', duration: state.duration || 0, position: state.position || 0, source: source === 'spotify' ? 'spotify-web' : 'android-media', isPlaying: !!state.playing });
-          } else if (state.artwork && trackRef.current!.albumArt !== state.artwork) setTrack(t => t && ({...t, albumArt: state.artwork!}));
-          setDuration(state.duration || 0); setCanSeek(state.canSeek !== false);
-          sync(state.position || 0, !!state.playing, state.speed ?? 1, roundtrip, changed);
-        } else { setTrack(null); setLyrics(null); sync(0, false, 1, 0, true); }
+        // Do not overwrite a newer Spotify push event with an older network/bridge response.
+        if (source === 'spotify' && revisionBeforeRequest !== eventRevision.current) return;
+        const roundtrip = performance.now() - started;
+        setLatency(Math.round(roundtrip));
+        if (state.retryAfterMs) {
+          delay = Math.max(1500, state.retryAfterMs);
+          setError('Spotify has temporarily limited updates. Retrying automatically.');
+          return;
+        }
+        failures = 0;
+        applyPlayback(state, source, roundtrip);
       } catch (problem) {
-        if (!cancelled) { failures++; delay = Math.min(15000, delay * 2 ** Math.min(4, failures)); if (failures >= 3) { setError(message(problem, 'Could not read your player. Check your connection in Sources.')); sync(clock.current.now(), false); } }
-      } finally { inFlight = false; if (!cancelled && !document.hidden) timer = setTimeout(poll, delay); }
+        if (!cancelled) {
+          failures++; delay = Math.min(15000, delay * 2 ** Math.min(4, failures));
+          if (failures >= 3) {
+            setError(message(problem, 'Could not read your player. Check its connection in Sources.'));
+            clock.current.reset(clock.current.now(), false); setPlaying(false);
+          }
+        }
+      } finally {
+        inFlight = false;
+        if (!cancelled && !document.hidden) timer = setTimeout(poll, delay);
+      }
     };
     const visible = () => { clearTimeout(timer); if (!document.hidden) void poll(); };
-    document.addEventListener('visibilitychange', visible); void poll();
+    document.addEventListener('visibilitychange', visible);
+    void poll();
     return () => { cancelled = true; clearTimeout(timer); document.removeEventListener('visibilitychange', visible); };
-  }, [source, prefs.preferredPlayer, spotifyConnected]);
-
+  }, [source, prefs.preferredPlayer, spotifyConnected, applyPlayback]);
   useEffect(() => {
     if (!track) return;
     let cancelled = false;
@@ -407,9 +482,9 @@ export default function AndroidApp() {
   const closeCalibration = useCallback(() => setCalibration(false), []);
   const audioLabel = micActive ? 'Microphone · live audio' : source === 'local' && playing ? 'Audio FFT · live' : source === 'manual' ? 'Manual timing · not linked' : source === 'spotify' ? 'Spotify SDK · add mic for beats' : source === 'device' ? 'Player clock · add mic for beats' : 'Audio reactive lighting';
 
-  return <div className={`mobile-app ${focus ? 'mobile-focus' : ''}`}>
-    {track?.albumArt && <BlurredCoverBackground coverUrl={track.albumArt} />}
-    <AmbientRimLights config={rim} palette={activePalette} audioEnergy={energy} isPlaying={playing || micActive} />
+  return <div className={`mobile-app ${focus ? 'mobile-focus' : ''} ${prefs.graphicsMode === 'smooth' ? 'mobile-smooth' : ''}`}>
+    {track?.albumArt && <BlurredCoverBackground coverUrl={track.albumArt} lite={prefs.graphicsMode === 'smooth'} />}
+    <AmbientRimLights config={rim} palette={activePalette} audioEnergy={energy} isPlaying={playing || micActive} reducedEffects={prefs.graphicsMode === 'smooth'} />
     <header className="mobile-header"><div><span className="mobile-brand">lyric<span>✦</span></span><span className="mobile-source">{source === 'spotify' ? (spotifyConnected ? 'Spotify connected' : autoReconnecting ? 'Reconnecting to Spotify…' : 'Spotify disconnected') : source === 'device' ? 'Music player connected' : source === 'manual' ? 'Manual lyrics' : 'Your music, in motion'}</span></div><div className="mobile-actions">
       <button aria-label="Toggle ambient lighting" aria-pressed={rim.enabled} onClick={() => setPrefs(p => ({...p, rim:{...p.rim, enabled:!p.rim.enabled}}))}><Sun size={20} opacity={rim.enabled ? 1 : .4}/></button>
       <button aria-label="Open queue" onClick={() => setQueueOpen(true)}><ListMusic size={20}/></button>
@@ -437,7 +512,7 @@ export default function AndroidApp() {
     <input aria-label="LRC lyrics file" ref={lrcInput} type="file" accept=".lrc,text/plain" hidden onChange={e => { const f = e.target.files?.[0]; if (f) void loadLrc(f); e.target.value = ''; }}/>
     <TrackSearchModal isOpen={search} previewsOnly lyricsOnly={searchForLyrics} onClose={() => setSearch(false)} onSelectTrack={t => void selectSearchResult(t)}/>
     {queueOpen && <Sheet title="Your queue" onClose={closeQueue}><p className="mobile-note">Add multiple audio files. Files remain available while the app is open.</p><button className="mobile-primary" onClick={() => fileInput.current?.click()}><Upload size={17}/> Add songs</button><label className="mobile-switch">Repeat queue<input type="checkbox" checked={repeat} onChange={e => setRepeat(e.target.checked)}/></label>{queue.length ? queue.map((item, index) => <button key={`${item.id}-${index}`} className={`mobile-queue-row ${track?.id === item.id ? 'active' : ''}`} onClick={() => { void selectTrack(item); setQueueOpen(false); }}><span>{String(index+1).padStart(2,'0')}</span><div><strong>{item.title}</strong><small>{item.artist}</small></div>{track?.id === item.id && <Music2 size={18}/>}</button>) : <p className="mobile-note">Your queue is empty. Choose a few songs to start listening.</p>}</Sheet>}
-    {calibration && <Sheet title="Lyric calibration" onClose={closeCalibration}><p className="mobile-note">Tap a line exactly when you hear its first word. Calibration is saved for this song. Word timings are estimated unless your LRC contains word timestamps.</p><div className="mobile-calibration"><button onClick={() => changeOffset(offset - 50)}>−50ms</button><strong>{offset > 0 ? '+' : ''}{offset}ms</strong><button onClick={() => changeOffset(offset + 50)}>+50ms</button></div><button className="mobile-secondary" onClick={() => changeOffset(0)}>Reset calibration</button>{source !== 'local' && source !== 'manual' && <p className="mobile-note">Last API round trip: {latency}ms. Updates: {source === 'spotify' ? 'about every 800ms' : 'about every 600ms'}; the lyric clock advances between updates.</p>}<div className="mobile-calibration-lines">{lyrics?.lines.map(line => <button key={line.id} className={position + offset/1000 >= line.time && position + offset/1000 < line.endTime ? 'active' : ''} onClick={() => changeOffset((line.time - position) * 1000)}><span>{time(line.time)}</span>{line.text || 'Instrumental'}</button>)}</div></Sheet>}
+    {calibration && <Sheet title="Lyric calibration" onClose={closeCalibration}><p className="mobile-note">Tap a line exactly when you hear its first word. Calibration is saved for this song. Word timings are estimated unless your LRC contains word timestamps.</p><div className="mobile-calibration"><button onClick={() => changeOffset(offset - 50)}>−50ms</button><strong>{offset > 0 ? '+' : ''}{offset}ms</strong><button onClick={() => changeOffset(offset + 50)}>+50ms</button></div><button className="mobile-secondary" onClick={() => changeOffset(0)}>Reset calibration</button>{source !== 'local' && source !== 'manual' && <p className="mobile-note">Last API round trip: {latency}ms. Updates: {source === 'spotify' ? 'event-driven, with ~1.4s calibration' : 'about every 650ms'}; the lyric clock advances between updates.</p>}<div className="mobile-calibration-lines">{lyrics?.lines.map(line => <button key={line.id} className={position + offset/1000 >= line.time && position + offset/1000 < line.endTime ? 'active' : ''} onClick={() => changeOffset((line.time - position) * 1000)}><span>{time(line.time)}</span>{line.text || 'Instrumental'}</button>)}</div></Sheet>}
     {settings && <Sheet title="Sources & settings" onClose={closeSettings}>
       <>{error && <div className="mobile-error" role="alert"><span>{error}</span><button aria-label="Dismiss connection error" onClick={() => setError('')}><X size={18}/></button></div>}</><section className="mobile-settings-section"><h3>Your music</h3><button className="mobile-secondary" onClick={() => { setSettings(false); fileInput.current?.click(); }}><Upload size={17}/> Choose audio files</button><button className="mobile-secondary" onClick={() => { setSettings(false); openSearch(true); }}>Manual lyrics for another player</button>{source === 'manual' && <p className="mobile-note">Manual mode doesn’t control Spotify. Match the playhead to your music and start the lyric clock.</p>}
       {track && <><button className="mobile-secondary" onClick={() => lrcInput.current?.click()}>Import LRC lyrics</button><button className="mobile-secondary" onClick={() => {setSettings(false);setCalibration(true);}}>Calibrate this song</button>{source === 'local' && <div className="mobile-metadata"><label>Song title<input value={track.title} onChange={e => { importedLyrics.current = false; setTrack({...track,title:e.target.value}); }}/></label><label>Artist<input value={track.artist} onChange={e => { importedLyrics.current = false; setTrack({...track,artist:e.target.value}); }}/></label></div>}</>}
@@ -473,7 +548,7 @@ export default function AndroidApp() {
         </>}
       </section>}
       {supportsMusicSync && <section className="mobile-settings-section"><h3>Android music player</h3><p className="mobile-note">Follows media sessions without Spotify API credentials. Requires optional notification access and may be restricted by Android or Play Protect.</p><label className="mobile-field">Preferred player<select value={prefs.preferredPlayer} onChange={e=>setPrefs(p=>({...p,preferredPlayer:e.target.value}))}><option value="">Automatic</option><option value="com.spotify.music">Spotify</option>{players.filter(p=>p.packageName!=='com.spotify.music').map(p=><option key={p.packageName} value={p.packageName}>{p.label}</option>)}</select></label><button className="mobile-secondary" onClick={async()=>{try{await AndroidMedia.openSettings();switchSource('device');}catch(e){setError(message(e,'Could not open notification settings'));}}}>Enable notification access</button><button className="mobile-secondary" onClick={()=>switchSource('device')}>Listen to music player</button></section>}
-      <section className="mobile-settings-section"><h3>Lighting</h3><p className="mobile-note">Local files drive the edges from their real audio spectrum. For music playing through speakers, enable the microphone. It won’t hear Spotify audio confined to headphones. The microphone stops when Lyric leaves the foreground; nothing is saved or uploaded.</p><button className="mobile-secondary" onClick={() => void toggleMic()}><Mic size={17}/>{micActive?'Stop microphone':'Use microphone for beats'}</button><label className="mobile-field">Light pattern<select value={rim.mode} onChange={e=>setPrefs(p=>({...p,rim:{...p.rim,mode:e.target.value as RimMode}}))}>{(['pulse','wave','aurora','liquid','static'] as RimMode[]).map(mode=><option key={mode} value={mode}>{mode[0].toUpperCase()+mode.slice(1)}</option>)}</select></label><label className="mobile-field">Color palette<select value={rim.palettePreset} onChange={e=>setPrefs(p=>({...p,rim:{...p.rim,palettePreset:e.target.value as PalettePreset}}))}>{Object.keys(PRESET_PALETTES).map(name=><option key={name} value={name}>{name==='album-art'?'Album colors':name}</option>)}</select></label>
+      <section className="mobile-settings-section"><h3>Lighting</h3><p className="mobile-note">Local files drive the edges from their real audio spectrum. For music playing through speakers, enable the microphone. It won’t hear Spotify audio confined to headphones. The microphone stops when Lyric leaves the foreground; nothing is saved or uploaded.</p><button className="mobile-secondary" onClick={() => void toggleMic()}><Mic size={17}/>{micActive?'Stop microphone':'Use microphone for beats'}</button><label className="mobile-field">Graphics quality<select value={prefs.graphicsMode} onChange={e => setPrefs(p => ({ ...p, graphicsMode: e.target.value as 'smooth' | 'cinematic' }))}><option value="smooth">Smooth (recommended · less GPU work)</option><option value="cinematic">Cinematic (full visual effects)</option></select></label><label className="mobile-field">Light pattern<select value={rim.mode} onChange={e=>setPrefs(p=>({...p,rim:{...p.rim,mode:e.target.value as RimMode}}))}>{(['pulse','wave','aurora','liquid','static'] as RimMode[]).map(mode=><option key={mode} value={mode}>{mode[0].toUpperCase()+mode.slice(1)}</option>)}</select></label><label className="mobile-field">Color palette<select value={rim.palettePreset} onChange={e=>setPrefs(p=>({...p,rim:{...p.rim,palettePreset:e.target.value as PalettePreset}}))}>{Object.keys(PRESET_PALETTES).map(name=><option key={name} value={name}>{name==='album-art'?'Album colors':name}</option>)}</select></label>
       <label className="mobile-range">Beat sensitivity <span>{prefs.sensitivity.toFixed(1)}×</span><input aria-label="Beat sensitivity" type="range" min="0.5" max="4" step="0.1" value={prefs.sensitivity} onChange={e=>setPrefs(p=>({...p,sensitivity:Number(e.target.value)}))}/></label><label className="mobile-range">Brightness <span>{Math.round(rim.intensity*100)}%</span><input aria-label="Lighting brightness" type="range" min="0.1" max="1" step="0.05" value={rim.intensity} onChange={e=>setPrefs(p=>({...p,rim:{...p.rim,intensity:Number(e.target.value)}}))}/></label><label className="mobile-range">Edge width <span>{rim.thickness}px</span><input aria-label="Edge width" type="range" min="2" max="20" step="1" value={rim.thickness} onChange={e=>setPrefs(p=>({...p,rim:{...p.rim,thickness:Number(e.target.value)}}))}/></label></section>
       <section className="mobile-settings-section"><h3>Playback & lyrics</h3><label className="mobile-field">Lyric style<select value={prefs.style} onChange={e=>setPrefs(p=>({...p,style:e.target.value as LyricStyle}))}><option value="smooth-captions">Smooth captions</option><option value="verci-single-word">Single word</option><option value="cinematic">Scrolling lines</option></select></label><label className="mobile-field">Sleep timer (keep Lyric open)<select aria-label="Sleep timer" value={sleepUntil?'on':'off'} onChange={e=>setSleepUntil(e.target.value==='off'?null:Date.now()+Number(e.target.value)*60000)}><option value="off">Off</option>{sleepUntil&&<option value="on">Timer is running</option>}<option value="15">15 minutes</option><option value="30">30 minutes</option><option value="60">60 minutes</option></select></label><button className="mobile-secondary" onClick={()=>{setSettings(false);setFocus(true);}}>Enter focus mode</button><p className="mobile-note">Recent lyrics and per-song calibration are saved on this device. Audio files are session-only. Search results are short previews. Lighting stays inside Lyric.</p></section>
     </Sheet>}

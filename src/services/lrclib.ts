@@ -22,7 +22,7 @@ export interface LyricsLookupResult {
 }
 
 const lyricsCache = new Map<string, LyricsData>();
-const CLIENT_ID = 'Lyric/1.4.0 (+https://github.com/rdp12356/lyric)';
+const CLIENT_ID = 'Lyric/1.5.0 (+https://github.com/rdp12356/lyric)';
 let rateLimitUntil = 0;
 const normalize = (s: string) => s.normalize('NFKD').replace(/\p{M}/gu, '').toLowerCase().replace(/[^\p{L}\p{N}]/gu, '');
 const cleanTitle = (s: string) => s.trim()
@@ -130,7 +130,8 @@ export async function lookupLyricsFromLRCLIB(
 
   const searchParams = new URLSearchParams({ track_name: title, artist_name: artist });
   const broadParams = new URLSearchParams({ q: title + ' ' + artist });
-  // /api/get requires album and duration; omitting them produces HTTP 400.
+  // LRCLIB's optional album/duration arguments improve precision, but
+  // alternate Spotify releases may need the relaxed title/artist lookup.
   const paths: string[] = [];
   if (albumName.trim() && duration > 0 && duration <= 3600) {
     const exactParams = new URLSearchParams({
@@ -139,7 +140,7 @@ export async function lookupLyricsFromLRCLIB(
     });
     paths.push('/api/get?' + exactParams);
   }
-  paths.push('/api/search?' + searchParams, '/api/search?' + broadParams);
+  paths.push('/api/get?' + searchParams, '/api/search?' + searchParams, '/api/search?' + broadParams);
 
   const candidates = new Map<number, LrclibRecord>();
   let networkFailed = false, serviceFailed = false, instrumentalFound = false;
