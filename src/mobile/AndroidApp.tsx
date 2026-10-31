@@ -16,14 +16,12 @@ import { BeatEnvelope, SILENCE, AudioEnergy } from '../services/beatEnvelope';
 import { SyncClock } from '../services/syncClock';
 import { readPreferences, writePreferences, songKey } from './preferences';
 import { Sheet } from './Sheet';
-import { SpotifyBrowserPlayer } from './SpotifyBrowserPlayer';
-import { spotifyTrackUri, SpotifyEmbedController } from '../services/spotifyBrowser';
 import type { Track, LyricsData, LyricStyle, RimMode, PalettePreset } from '../types';
 import './mobile.css';
 
 const time = (s: number) => `${Math.floor(Math.max(0, s) / 60)}:${Math.floor(Math.max(0, s) % 60).toString().padStart(2, '0')}`;
 const message = (error: unknown, fallback: string) => error instanceof Error ? error.message : fallback;
-type Source = 'device' | 'spotify' | 'local' | 'manual' | 'browser';
+type Source = 'device' | 'spotify' | 'local' | 'manual';
 const styles: LyricStyle[] = ['smooth-captions', 'verci-single-word', 'cinematic'];
 
 export default function AndroidApp() {
@@ -53,13 +51,6 @@ export default function AndroidApp() {
   const [clientId, setClientId] = useState('');
   const [spotifyIdentity, setSpotifyIdentity] = useState({ packageName: 'io.github.rdp12356.lyric', fingerprint: '' });
   const [connecting, setConnecting] = useState(false);
-  const [browserLink, setBrowserLink] = useState('');
-  const [browserTitle, setBrowserTitle] = useState('');
-  const [browserArtist, setBrowserArtist] = useState('');
-  const [browserUri, setBrowserUri] = useState('');
-  const browserController = useRef<SpotifyEmbedController | null>(null);
-  const [savedLinks, setSavedLinks] = useState<{uri:string;title:string;artist:string}[]>(()=>{try{const value=JSON.parse(localStorage.getItem('lyric.browser.links')||'[]');return Array.isArray(value)?value.filter(item=>item&&spotifyTrackUri(item.uri)&&typeof item.title==='string'&&typeof item.artist==='string').slice(0,20):[];}catch{return [];}});
-
   const [canSeek, setCanSeek] = useState(true);
   const [sleepUntil, setSleepUntil] = useState<number | null>(null);
   const [latency, setLatency] = useState(0);
@@ -226,11 +217,6 @@ export default function AndroidApp() {
       catch (problem) { setError(message(problem, 'This control is unavailable in your music player.')); }
       return;
     }
-    if (source === 'browser') {
-      if(action==='play-pause')browserController.current?.togglePlay();
-      else setError('Choose a different saved Spotify link in Sources.');
-      return;
-    }
     if (source === 'manual') {
       if (action === 'play-pause') sync(clock.current.now(), !playing, 1, 0, true);
       else setError('Change the song in your music app, then choose its lyrics in Search.');
@@ -253,8 +239,7 @@ export default function AndroidApp() {
     const clamped = Math.max(0, Math.min(duration, seconds));
     if (!canSeek) return;
     try {
-      if (source === 'browser') { if (!browserController.current) throw new Error('Wait for the Spotify web player to load.'); browserController.current.seek(clamped); sync(clamped,playing,1,0,true); }
-      else if (source === 'device') await AndroidMedia.control({ action: 'seek', position: clamped, packageName: prefs.preferredPlayer });
+      if (source === 'device') await AndroidMedia.control({ action: 'seek', position: clamped, packageName: prefs.preferredPlayer });
       else if (source === 'spotify') await Spotify.control({ action: 'seek', position: clamped });
       else if (source === 'manual') sync(clamped, playing, 1, 0, true);
       else if (audio.current && duration > 0) { audio.current.currentTime = clamped; sync(clamped, !audio.current.paused, 1, 0, true); }
@@ -275,15 +260,6 @@ export default function AndroidApp() {
   const switchSource = (next: Source) => {
     audio.current?.pause(); sourceRef.current = next; setSource(next); setTrack(null); setLyrics(null); setError(''); importedLyrics.current = false; sync(0, false, 1, 0, true); setSettings(false);
   };
-  const loadBrowserTrack = (link=browserLink, title=browserTitle, artist=browserArtist) => {
-    const uri=spotifyTrackUri(link);
-    if(!uri){setError('Paste a Spotify song link, such as https://open.spotify.com/track/…');return;}
-    if(!title.trim() || !artist.trim()){setError('Enter the song title and artist so Lyric can find the correct lyrics.');return;}
-    switchSource('browser');setBrowserUri(uri);setBrowserLink(uri);setBrowserTitle(title);setBrowserArtist(artist);
-    setCanSeek(true);setDuration(0);setTrack({id:uri,title:title.trim(),artist:artist.trim(),album:'',albumArt:'',duration:0,position:0,isPlaying:false,source:'spotify-web'});
-    const recent=[{uri,title:title.trim(),artist:artist.trim()},...savedLinks.filter(item=>item.uri!==uri)].slice(0,20);setSavedLinks(recent);
-    try{localStorage.setItem('lyric.browser.links',JSON.stringify(recent));}catch{}
-  };
   const toggleMic = async () => {
     if (micActive) { stopMic(); return; }
     try { if (isAndroid) await AudioInput.start(); else await microphone.current.start(); setMicActive(true); setError(''); }
@@ -300,7 +276,6 @@ export default function AndroidApp() {
     const timer = setTimeout(() => {
       if (playingRef.current && sourceRef.current === 'device') void AndroidMedia.control({ action: 'play-pause', packageName: prefsRef.current.preferredPlayer }).catch(() => {});
       else if (playingRef.current && sourceRef.current === 'spotify') void Spotify.control({ action: 'play-pause' }).catch(() => {});
-      if (playingRef.current && sourceRef.current === 'browser') browserController.current?.togglePlay();
       audio.current?.pause(); sync(clock.current.now(), false); stopMic(); setFocus(false); setSleepUntil(null);
     }, Math.max(0, sleepUntil - Date.now()));
     return () => clearTimeout(timer);
@@ -316,17 +291,16 @@ export default function AndroidApp() {
   const closeSettings = useCallback(() => setSettings(false), []);
   const closeQueue = useCallback(() => setQueueOpen(false), []);
   const closeCalibration = useCallback(() => setCalibration(false), []);
-  const audioLabel = micActive ? 'Microphone · live audio' : source === 'local' && playing ? 'Audio FFT · live' : source === 'browser' ? 'Spotify web embed · player timing' : source === 'manual' ? 'Manual timing · not linked' : source === 'spotify' ? 'Spotify SDK · add mic for beats' : source === 'device' ? 'Player clock · add mic for beats' : 'Audio reactive lighting';
+  const audioLabel = micActive ? 'Microphone · live audio' : source === 'local' && playing ? 'Audio FFT · live' : source === 'manual' ? 'Manual timing · not linked' : source === 'spotify' ? 'Spotify SDK · add mic for beats' : source === 'device' ? 'Player clock · add mic for beats' : 'Audio reactive lighting';
 
   return <div className={`mobile-app ${focus ? 'mobile-focus' : ''}`}>
     {track?.albumArt && <BlurredCoverBackground coverUrl={track.albumArt} />}
     <AmbientRimLights config={rim} palette={activePalette} audioEnergy={energy} isPlaying={playing || micActive} />
-    <header className="mobile-header"><div><span className="mobile-brand">lyric<span>✦</span></span><span className="mobile-source">{source === 'browser' ? 'Spotify web player' : source === 'spotify' ? 'Spotify connected' : source === 'device' ? 'Music player connected' : source === 'manual' ? 'Manual lyrics' : 'Your music, in motion'}</span></div><div className="mobile-actions">
+    <header className="mobile-header"><div><span className="mobile-brand">lyric<span>✦</span></span><span className="mobile-source">{source === 'spotify' ? 'Spotify connected' : source === 'device' ? 'Music player connected' : source === 'manual' ? 'Manual lyrics' : 'Your music, in motion'}</span></div><div className="mobile-actions">
       <button aria-label="Toggle ambient lighting" aria-pressed={rim.enabled} onClick={() => setPrefs(p => ({...p, rim:{...p.rim, enabled:!p.rim.enabled}}))}><Sun size={20} opacity={rim.enabled ? 1 : .4}/></button>
       <button aria-label="Open queue" onClick={() => setQueueOpen(true)}><ListMusic size={20}/></button>
       <button aria-label="Sources and settings" onClick={() => setSettings(true)}><Settings2 size={20}/></button>
     </div></header>
-    {source==='browser' && browserUri && <SpotifyBrowserPlayer uri={browserUri} onController={value=>{browserController.current=value;}} onPlayback={state=>{setDuration(state.duration);sync(state.position,state.playing,1,0);}} onError={setError}/>}
     <main className="mobile-stage">
       {!track ? <div className="mobile-welcome"><div className="mobile-welcome-icon"><Headphones size={34} strokeWidth={1.5}/></div><h1>Your music.<br/><span>Every word.</span></h1>
         <p>{source === 'spotify' ? 'Start a song in Spotify, then return here. Your account’s active playback will appear automatically.' : source === 'device' ? permission ? 'Play a song in your selected music app, then return here.' : 'Enable notification access in Sources to follow your selected player.' : 'Open your songs. Feel every beat. Bring the words to life.'}</p>
@@ -354,7 +328,6 @@ export default function AndroidApp() {
       <>{error && <div className="mobile-error" role="alert"><span>{error}</span><button aria-label="Dismiss connection error" onClick={() => setError('')}><X size={18}/></button></div>}</><section className="mobile-settings-section"><h3>Your music</h3><button className="mobile-secondary" onClick={() => { setSettings(false); fileInput.current?.click(); }}><Upload size={17}/> Choose audio files</button><button className="mobile-secondary" onClick={() => { setSettings(false); openSearch(true); }}>Manual lyrics for another player</button>{source === 'manual' && <p className="mobile-note">Manual mode doesn’t control Spotify. Match the playhead to your music and start the lyric clock.</p>}
       {track && <><button className="mobile-secondary" onClick={() => lrcInput.current?.click()}>Import LRC lyrics</button><button className="mobile-secondary" onClick={() => {setSettings(false);setCalibration(true);}}>Calibrate this song</button>{source === 'local' && <div className="mobile-metadata"><label>Song title<input value={track.title} onChange={e => { importedLyrics.current = false; setTrack({...track,title:e.target.value}); }}/></label><label>Artist<input value={track.artist} onChange={e => { importedLyrics.current = false; setTrack({...track,artist:e.target.value}); }}/></label></div>}</>}
       </section>
-      <section className="mobile-settings-section"><h3>Spotify in browser <span className="mobile-badge">Song links · no Client ID</span></h3><p className="mobile-note">Paste a Spotify song link to use its official embedded web player inside Lyric. Playback timing comes from that player, not another Spotify tab. Full playback and login availability depend on Spotify and the device; previews may be limited. Enter the title and artist for lyric lookup.</p><label className="mobile-field">Spotify song link<input value={browserLink} placeholder="https://open.spotify.com/track/…" onChange={e=>setBrowserLink(e.target.value)}/></label><label className="mobile-field">Browser song title<input value={browserTitle} onChange={e=>setBrowserTitle(e.target.value)}/></label><label className="mobile-field">Browser artist<input value={browserArtist} onChange={e=>setBrowserArtist(e.target.value)}/></label><button className="mobile-secondary" onClick={()=>loadBrowserTrack()}>Load Spotify web player</button>{isAndroid ? <button className="mobile-secondary" onClick={()=>void Spotify.openWebPlayer({uri:spotifyTrackUri(browserLink)||undefined}).catch(e=>setError(message(e,'Could not open browser')))}>Open Spotify in browser</button> : <a className="mobile-secondary" href="https://open.spotify.com/" target="_blank" rel="noopener noreferrer">Open Spotify in browser</a>}<p className="mobile-note">Opening a separate browser does not link its playback to Lyric. Use the embedded player for reported timing, or Manual lyrics for external playback. Preview offsets may differ from the full recording.</p>{savedLinks.map(item=><button className="mobile-queue-row" key={item.uri} onClick={()=>loadBrowserTrack(item.uri,item.title,item.artist)}><div><strong>{item.title}</strong><small>{item.artist}</small></div></button>)}{savedLinks.length>0&&<button className="mobile-text-button" onClick={()=>{setSavedLinks([]);try{localStorage.removeItem('lyric.browser.links');}catch{}}}>Clear saved browser links</button>}</section>
       {isAndroid && <section className="mobile-settings-section"><h3>Spotify app <span className="mobile-badge">{spotifyConnected ? 'Connected' : 'Official Android SDK'}</span></h3><p className="mobile-note">Connect to the installed Spotify app using the official Android App Remote SDK. Reading playback state does not use Web API access. Spotify decides which controls your account can use; playing arbitrary tracks may require Premium.</p>{spotifyConnected ? <div className="mobile-button-row"><button className="mobile-secondary" onClick={() => switchSource('spotify')}>Follow Spotify</button><button className="mobile-secondary" onClick={() => void Spotify.openApp().catch(e=>setError(message(e,'Could not open Spotify')))}>Open Spotify</button><button className="mobile-text-button" onClick={async () => { await Spotify.disconnect(); setSpotifyConnected(false); if(source==='spotify')switchSource('local'); }}>Disconnect</button></div> : <><label className="mobile-field">Public Client ID<input value={clientId} maxLength={32} autoCapitalize="none" autoCorrect="off" spellCheck={false} placeholder="32-character Spotify Client ID" onChange={e => setClientId(e.target.value)}/></label><button className="mobile-secondary" onClick={() => void Spotify.openApp().catch(e=>setError(message(e,'Could not open Spotify')))}>Open Spotify first</button><p className="mobile-note">Open the official Spotify app, sign in and start a song, then return here and tap Connect Spotify. Spotify Lite is not supported.</p><p className="mobile-note">Register Android in your Spotify developer app with this redirect, package name, and this APK’s SHA-1 fingerprint:<code>http://127.0.0.1:43821/callback</code><code>{spotifyIdentity.packageName}</code><code>{spotifyIdentity.fingerprint || 'Fingerprint is available in the installed Android app'}</code></p><button className="mobile-secondary" disabled={connecting || !/^[a-f0-9]{32}$/i.test(clientId.trim())} onClick={() => void connectSpotify()}>{connecting ? 'Waiting for Spotify login…' : 'Connect Spotify'}</button>{connecting && <button className="mobile-text-button" onClick={async () => { setConnecting(false); await Spotify.disconnect().catch(() => {}); }}>Cancel login</button>}</>}</section>}
       {supportsMusicSync && <section className="mobile-settings-section"><h3>Android music player</h3><p className="mobile-note">Follows media sessions without Spotify API credentials. Requires optional notification access and may be restricted by Android or Play Protect.</p><label className="mobile-field">Preferred player<select value={prefs.preferredPlayer} onChange={e=>setPrefs(p=>({...p,preferredPlayer:e.target.value}))}><option value="">Automatic</option><option value="com.spotify.music">Spotify</option>{players.filter(p=>p.packageName!=='com.spotify.music').map(p=><option key={p.packageName} value={p.packageName}>{p.label}</option>)}</select></label><button className="mobile-secondary" onClick={async()=>{try{await AndroidMedia.openSettings();switchSource('device');}catch(e){setError(message(e,'Could not open notification settings'));}}}>Enable notification access</button><button className="mobile-secondary" onClick={()=>switchSource('device')}>Listen to music player</button></section>}
       <section className="mobile-settings-section"><h3>Lighting</h3><p className="mobile-note">Local files drive the edges from their real audio spectrum. For music playing through speakers, enable the microphone. It won’t hear Spotify audio confined to headphones. The microphone stops when Lyric leaves the foreground; nothing is saved or uploaded.</p><button className="mobile-secondary" onClick={() => void toggleMic()}><Mic size={17}/>{micActive?'Stop microphone':'Use microphone for beats'}</button><label className="mobile-field">Light pattern<select value={rim.mode} onChange={e=>setPrefs(p=>({...p,rim:{...p.rim,mode:e.target.value as RimMode}}))}>{(['pulse','wave','aurora','liquid','static'] as RimMode[]).map(mode=><option key={mode} value={mode}>{mode[0].toUpperCase()+mode.slice(1)}</option>)}</select></label><label className="mobile-field">Color palette<select value={rim.palettePreset} onChange={e=>setPrefs(p=>({...p,rim:{...p.rim,palettePreset:e.target.value as PalettePreset}}))}>{Object.keys(PRESET_PALETTES).map(name=><option key={name} value={name}>{name==='album-art'?'Album colors':name}</option>)}</select></label>

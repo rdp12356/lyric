@@ -7,5 +7,3 @@
 @media(max-height:590px){.mobile-energy{display:none}.mobile-player{padding-top:8px;padding-bottom:2px}.mobile-header .mobile-brand{font-size:24px}.mobile-welcome{padding:8px}.mobile-welcome p{font-size:11px;line-height:1.5;margin-bottom:8px}.mobile-welcome .mobile-text-button{margin-top:0;min-height:32px}.mobile-welcome .mobile-primary{min-height:40px}.mobile-welcome h1{margin-bottom:6px}.mobile-sheet{max-height:95dvh}.mobile-stage .min-h-\[160px\]{min-height:54px}}
 
 .mobile-app .mobile-sheet{background:#15131f}.mobile-app .mobile-sheet .mobile-error{position:sticky;top:0;z-index:80}
-
-.mobile-browser-player{position:relative;z-index:25;width:min(100%,560px);margin:8px auto 0;flex-shrink:0}.mobile-browser-player iframe{border:0;width:100%;border-radius:12px}.mobile-browser-player small{display:block;font-size:9px;line-height:1.5;color:#aaa2be;padding:4px 8px}.mobile-browser-player>div{min-height:152px}@media(max-height:650px){.mobile-app:has(.mobile-browser-player) .mobile-stage{min-height:90px}.mobile-app:has(.mobile-browser-player){overflow-y:auto}}

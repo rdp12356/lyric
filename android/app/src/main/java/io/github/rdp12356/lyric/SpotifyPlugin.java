@@ -160,21 +160,6 @@ public class SpotifyPlugin extends Plugin {
             catch (Exception error) { call.reject("Install the official Spotify app to use App Remote."); }
         });
     }
-    @PluginMethod public void openWebPlayer(PluginCall call) {
-        getActivity().runOnUiThread(() -> {
-            try {
-                String uri = call.getString("uri", "");
-                String url = uri.matches("spotify:track:[A-Za-z0-9]{22}") ? "https://open.spotify.com/track/" + uri.substring(14) : "https://open.spotify.com/";
-                Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse(url));
-                intent.addCategory(Intent.CATEGORY_BROWSABLE);
-                Intent probe = new Intent(Intent.ACTION_VIEW, Uri.parse("https://www.example.com/"));
-                probe.addCategory(Intent.CATEGORY_BROWSABLE);
-                android.content.pm.ResolveInfo browser = getContext().getPackageManager().resolveActivity(probe, PackageManager.MATCH_DEFAULT_ONLY);
-                if (browser != null && browser.activityInfo != null && !"android".equals(browser.activityInfo.packageName)) intent.setPackage(browser.activityInfo.packageName);
-                getActivity().startActivity(intent); call.resolve();
-            } catch (Exception error) { call.reject("Could not open a web browser. Open https://open.spotify.com manually."); }
-        });
-    }
     @Override protected void handleOnResume() {
         if (wantsConnection && !connecting.get() && (remote == null || !remote.isConnected())) {
             String client = prefs().getString("clientId", DEFAULT_CLIENT_ID); if (!client.isEmpty()) getActivity().runOnUiThread(() -> connectRemote(client, false, null));

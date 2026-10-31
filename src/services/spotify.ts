@@ -8,5 +8,4 @@ export const Spotify = registerPlugin<{
   getPlayback(): Promise<AndroidPlayback>;
   control(options: { action: 'play-pause' | 'next' | 'previous' | 'seek'; position?: number }): Promise<void>;
   openApp(): Promise<void>;
-  openWebPlayer(options?: {uri?: string}): Promise<void>;
 }>('Spotify');

@@ -1,13 +1,3 @@
-# Browser player update (1.2.0)
-
-Use **Sources & settings → Spotify in browser**. Paste a direct `https://open.spotify.com/track/...` link or `spotify:track:...` URI, enter its song title and artist, then choose **Load Spotify web player**. The official Spotify embed stays visible in Lyric; its iframe API supplies playback position, duration, paused/buffering state, and permitted controls. Lyric uses that reported timing to advance lyrics. Only direct song links are accepted, and up to 20 labeled links are saved locally with a Clear action. Title/artist fields are user-entered metadata for LRCLIB lookup, not a claim of verified Spotify metadata.
-
-This mode needs no Client ID or notification access. It does **not** bypass Spotify playback restrictions. Full playback, authentication, DRM support, cookies, and preview limits depend on Spotify and Android WebView/browser support. A preview's offset within the full recording may be unknown, so full-song lyric alignment is not guaranteed. Music audio inside the cross-origin Spotify iframe is not exposed to Lyric's analyser. Speaker/microphone lighting remains optional; headphone-only embedded audio cannot drive Lyric's FFT.
-
-**Open Spotify in browser** launches the normal browser when Android can identify it, using only the official Spotify host. It does not monitor or control another browser tab or share its login state with Lyric's WebView. For playback in that separate browser, use the existing Manual lyrics mode or a separately authorized integration. Spotify logins remain on Spotify's own pages; Lyric never asks for account passwords.
-
-Browser UI tests mock Spotify's documented iframe API to verify URL rejection, controller setup, playback position/seek delegation, saved links, and narrow layouts. Actual full/preview playback and login require testing against Spotify on the device; a mock is not proof of full-track availability.
-
 # Lyric for Android 1.1.0
 
 The default **Local edition** plays your files and catalog previews, caches lyrics for offline use, imports LRC files, and adds optional official Spotify App Remote connectivity. It has **no notification-listener service**. The separate **Connected edition** also supports generic Android media sessions through optional notification access, which may be blocked for sideloaded apps. Keep Play Protect enabled.
