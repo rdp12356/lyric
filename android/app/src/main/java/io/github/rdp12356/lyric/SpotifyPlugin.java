@@ -276,7 +276,16 @@ public class SpotifyPlugin extends Plugin {
                     if (call != null || rememberAfterAuthorization) prefs().edit().putBoolean(PREF_AUTO_RECONNECT, true).apply();
                     rememberAfterAuthorization = false;
                     subscription = remote.getPlayerApi().subscribeToPlayerState();
-                    subscription.setEventCallback(state -> latest = state);
+                    // Notify the UI as soon as Spotify reports a meaningful state change.
+                    // The JS clock interpolates between events; slower reads reconcile drift.
+                    subscription.setEventCallback(state -> {
+                        latest = state;
+                        if (state == null) return;
+                        handler.post(() -> {
+                            if (attempt != generation || remote == null || !remote.isConnected()) return;
+                            notifyListeners("playerState", eventSnapshot(state));
+                        });
+                    });
                     subscription.setErrorCallback(error -> latest = null);
                     if (call != null) call.resolve(status());
                 }
@@ -287,6 +296,29 @@ public class SpotifyPlugin extends Plugin {
                 }
             });
         } catch (Exception error) { handler.removeCallbacks(timeout); connecting.set(false); rememberAfterAuthorization = false; if (call != null) call.reject("Could not open Spotify. Install the official Spotify app first."); }
+    }
+    private JSObject eventSnapshot(PlayerState state) {
+        JSObject result = new JSObject();
+        result.put("permissionGranted", true);
+        result.put("active", state.track != null);
+        if (state.track != null) {
+            Track track = state.track;
+            result.put("title", track.name);
+            result.put("artist", track.artist == null ? "" : track.artist.name);
+            result.put("album", track.album == null ? "" : track.album.name);
+            result.put("trackId", track.uri);
+            result.put("duration", track.duration / 1000.0);
+            result.put("position", state.playbackPosition / 1000.0);
+            result.put("playing", !state.isPaused);
+            result.put("speed", state.playbackSpeed);
+            result.put("packageName", "com.spotify.music");
+            result.put("canSeek", state.playbackRestrictions != null && state.playbackRestrictions.canSeek);
+            // Artwork is fetched asynchronously by the existing playback method.
+            if (track.imageUri != null && track.imageUri.raw != null
+                    && track.imageUri.raw.equals(artworkKey) && !artwork.isEmpty())
+                result.put("artwork", artwork);
+        }
+        return result;
     }
     private void dropConnection() {
         if (subscription != null) subscription.cancel(); subscription = null;
