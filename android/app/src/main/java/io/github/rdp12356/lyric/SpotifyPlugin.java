@@ -270,7 +270,7 @@ public class SpotifyPlugin extends Plugin {
                 @Override public void onConnected(SpotifyAppRemote value) {
                     if (attempt != generation || !wantsConnection) { SpotifyAppRemote.disconnect(value); return; }
                     handler.removeCallbacks(timeout); pendingLogin = null; remote = value; connecting.set(false);
-                    if (call != null && !prefs().contains(PREF_AUTO_RECONNECT)) prefs().edit().putBoolean(PREF_AUTO_RECONNECT, true).apply();
+                    if (call != null) prefs().edit().putBoolean(PREF_AUTO_RECONNECT, true).apply();
                     subscription = remote.getPlayerApi().subscribeToPlayerState();
                     subscription.setEventCallback(state -> latest = state);
                     subscription.setErrorCallback(error -> latest = null);
