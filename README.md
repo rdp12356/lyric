@@ -1,5 +1,7 @@
 # Lyric ✦ Open-Source Ambient Rim Lighting & Kinetic Synced Lyrics
 
+**Android port:** See [Android installation, permissions, and build instructions](docs/ANDROID.md). Version 1.1 adds measured beat-reactive edges, saved calibration, a local queue, offline lyrics, focus mode, and optional official Spotify Android SDK connectivity in Local without notification access. Generic media-session sync remains in Connected.
+
 <div align="center">
 
 [![Live Web App](https://img.shields.io/badge/Live_Web_App-GitHub_Pages-brightgreen?logo=githubpages)](https://rithvikvatti.github.io/lyric/)

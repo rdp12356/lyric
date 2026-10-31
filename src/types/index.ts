@@ -1,4 +1,5 @@
 export type AudioSourceType =
+  | 'android-media'
   | 'demo'
   | 'macos-music'
   | 'macos-spotify'

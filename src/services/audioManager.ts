@@ -1,4 +1,5 @@
 import { Track } from '../types';
+import { spectrumEnergy, SILENCE } from './beatEnvelope';
 
 export const DEMO_TRACKS: Track[] = [
   {
@@ -77,14 +78,19 @@ class AudioVisualizerEngine {
   private isConnected = false;
 
   public init(audioEl: HTMLAudioElement) {
+    if (this.audioElement !== audioEl) {
+      this.sourceNode?.disconnect();
+      this.sourceNode = null;
+      this.isConnected = false;
+    }
     this.audioElement = audioEl;
     if (!this.audioCtx) {
       const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
       if (!AudioContextClass) return;
       this.audioCtx = new AudioContextClass();
       this.analyser = this.audioCtx.createAnalyser();
-      this.analyser.fftSize = 256;
-      this.analyser.smoothingTimeConstant = 0.8;
+      this.analyser.fftSize = 2048;
+      this.analyser.smoothingTimeConstant = 0.55;
       const bufferLength = this.analyser.frequencyBinCount;
       this.dataArray = new Uint8Array(bufferLength);
     }
@@ -106,6 +112,12 @@ class AudioVisualizerEngine {
     if (this.audioCtx && this.audioCtx.state === 'suspended') {
       this.audioCtx.resume();
     }
+  }
+
+  public getMeasuredEnergy() {
+    if (!this.analyser || !this.dataArray || !this.audioCtx) return SILENCE;
+    this.analyser.getByteFrequencyData(this.dataArray as Uint8Array<ArrayBuffer>);
+    return spectrumEnergy(this.dataArray, this.audioCtx.sampleRate, this.analyser.fftSize);
   }
 
   public isMicActive = false;
@@ -132,7 +144,7 @@ class AudioVisualizerEngine {
         await this.audioCtx.resume();
       }
       this.analyser = this.audioCtx.createAnalyser();
-      this.analyser.fftSize = 256;
+      this.analyser.fftSize = 2048;
       this.analyser.smoothingTimeConstant = 0.75;
       this.dataArray = new Uint8Array(this.analyser.frequencyBinCount);
 
@@ -157,42 +169,9 @@ class AudioVisualizerEngine {
       return { bass: 0.05, mid: 0.05, treble: 0.05, overall: 0.05 };
     }
 
-    // 1. If mic is active or HTML audio is streaming, use live acoustic FFT data
-    if (this.analyser && this.dataArray) {
-      this.analyser.getByteFrequencyData(this.dataArray as any);
-
-      let total = 0;
-      for (let i = 0; i < 16; i++) {
-        total += this.dataArray[i];
-      }
-
-      // If we are actively receiving sound from speakers/mic/audio tag
-      if (total > 12) {
-        let bassSum = 0;
-        const bassBins = Math.min(8, this.dataArray.length);
-        for (let i = 0; i < bassBins; i++) {
-          bassSum += this.dataArray[i];
-        }
-        const bass = Math.min(1.0, (bassSum / (bassBins * 255)) * 1.6);
-
-        let midSum = 0;
-        const midEnd = Math.min(32, this.dataArray.length);
-        for (let i = bassBins; i < midEnd; i++) {
-          midSum += this.dataArray[i];
-        }
-        const mid = midSum / ((midEnd - bassBins) * 255);
-
-        let trebleSum = 0;
-        const trebleEnd = Math.min(64, this.dataArray.length);
-        for (let i = midEnd; i < trebleEnd; i++) {
-          trebleSum += this.dataArray[i];
-        }
-        const treble = trebleSum / ((trebleEnd - midEnd) * 255);
-
-        const overall = (bass * 0.55 + mid * 0.3 + treble * 0.15);
-        return { bass, mid, treble, overall };
-      }
-    }
+    // Preserve the desktop fallback, but use correctly calibrated FFT bands for measured audio.
+    const measured = this.getMeasuredEnergy();
+    if (measured.overall > 0.001) return measured;
 
     // 2. Dynamic Procedural Rhythm Visualizer Engine
     // Synthesizes live beat & sub-bass frequency dynamics synced with playback clock
@@ -269,7 +248,7 @@ export function createTrackFromFile(file: File): Track {
   }
 
   return {
-    id: `local-${Date.now()}`,
+    id: `local-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
     title,
     artist,
     album: 'Local Music Library',

@@ -1,0 +1,74 @@
+name: Android APK
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  android:
+    runs-on: ubuntu-latest
+    env:
+      ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: 'platform-tools platforms;android-35 build-tools;34.0.0'
+      - run: npm ci --ignore-scripts
+      - run: npx playwright install --with-deps chromium
+      - name: Build web assets and sync Android
+        run: npm run android:sync
+      - name: Check Android UI
+        run: |
+          npm run dev -- --host 127.0.0.1 > /tmp/lyric-vite.log 2>&1 &
+          for attempt in $(seq 1 30); do
+            curl -sf http://127.0.0.1:5173/ > /dev/null && break
+            sleep 1
+          done
+          npm run test:android-ui
+      - name: Restore optional stable development signing key
+        env:
+          ANDROID_DEBUG_KEYSTORE_BASE64: ${{ secrets.ANDROID_DEBUG_KEYSTORE_BASE64 }}
+        run: |
+          python3 - <<'PYKEY'
+          import os, base64, pathlib
+          value = os.environ.get('ANDROID_DEBUG_KEYSTORE_BASE64', '')
+          if value:
+              target = pathlib.Path.home() / '.android' / 'debug.keystore'
+              target.parent.mkdir(parents=True, exist_ok=True)
+              target.write_bytes(base64.b64decode(value, validate=True))
+              target.chmod(0o600)
+          PYKEY
+      - name: Build and lint APK
+        working-directory: android
+        run: ./gradlew assembleLocalDebug lintLocalDebug assembleConnectedDebug lintConnectedDebug --no-daemon
+      - name: Verify Local APK has no notification access
+        run: node scripts/verify-local-apk.cjs
+      - name: Generate Spotify Android registration details
+        run: node scripts/spotify-setup.cjs
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Lyric-Android-Local-debug
+          path: |
+            android/app/build/outputs/apk/local/debug/app-local-debug.apk
+            android/app/build/outputs/apk/local/debug/spotify-android-setup.txt
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Lyric-Android-Connected-debug
+          path: android/app/build/outputs/apk/connected/debug/app-connected-debug.apk
+          if-no-files-found: error

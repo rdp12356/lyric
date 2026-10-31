@@ -13,7 +13,12 @@
     "electron:dev": "concurrently \"node server/index.js\" \"vite\" \"electron electron/main.cjs\"",
     "package:mac": "npm run build && electron-builder --mac --dir",
     "package:win": "npm run build && electron-builder --win zip",
-    "build:dmg": "npm run build && electron-builder --mac dmg"
+    "build:dmg": "npm run build && electron-builder --mac dmg",
+    "android:sync": "npm run build && cap sync android",
+    "android:open": "cap open android",
+    "android:apk": "npm run android:sync && cd android && ./gradlew assembleLocalDebug",
+    "test:android-ui": "node tests/sync-audio.cjs && node tests/android-smoke.cjs && node tests/android-media-smoke.cjs && node tests/android-ux-smoke.cjs",
+    "test:sync": "node tests/sync-audio.cjs"
   },
   "build": {
     "appId": "xyz.lyric.app",
@@ -57,6 +62,9 @@
   "author": "Lyric Contributors",
   "license": "MIT",
   "dependencies": {
+    "@capacitor/android": "^7.6.10",
+    "@capacitor/core": "^7.6.10",
+    "@emotion/is-prop-valid": "^1.4.0",
     "@ybouane/liquidglass": "^1.0.3",
     "cors": "^2.8.5",
     "express": "^4.21.2",
@@ -66,6 +74,8 @@
     "react-dom": "^19.0.0"
   },
   "devDependencies": {
+    "@capacitor/cli": "^7.6.10",
+    "@playwright/test": "^1.64.1",
     "@tailwindcss/vite": "^4.0.9",
     "@types/node": "^22.13.5",
     "@types/react": "^19.0.10",
