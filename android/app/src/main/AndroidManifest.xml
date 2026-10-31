@@ -3,7 +3,7 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <uses-feature android:name="android.hardware.microphone" android:required="false" />
-    <queries><package android:name="com.spotify.music" /></queries>
+    <queries><package android:name="com.spotify.music" /><intent><action android:name="android.intent.action.VIEW" /><data android:scheme="https" /></intent></queries>
 
     <application
         android:allowBackup="true"
@@ -27,6 +27,12 @@
             </intent-filter>
 
 
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="lyric" android:host="spotify-return" />
+            </intent-filter>
         </activity>
 
         <provider

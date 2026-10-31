@@ -20,13 +20,13 @@ console.log('PASS: optional Android player connection, preferred Spotify selecti
 const local=await browser.newPage({viewport:{width:390,height:844}});
 await local.addInitScript(()=>{
  window.androidBridge={};window.nativeCalls=[];window.spotifyFixture={permissionGranted:true,active:true,title:'Spotify Song',artist:'Artist',album:'Album',duration:180,position:15,playing:true,canSeek:true,packageName:'com.spotify.music'};window.mic=false;
- const methods={AndroidMedia:['getCapabilities'],Spotify:['getStatus','connect','getPlayback','control','disconnect','openApp'],AudioInput:['start','stop','getEnergy','setKeepAwake']};
+ const methods={AndroidMedia:['getCapabilities'],Spotify:['getStatus','connect','connectBrowser','getPlayback','control','disconnect','openApp'],AudioInput:['start','stop','getEnergy','setKeepAwake']};
  window.Capacitor={PluginHeaders:Object.entries(methods).map(([name,list])=>({name,methods:list.map(name=>({name,rtype:'promise'}))})),nativePromise:async(plugin,method,options)=>{
   window.nativeCalls.push({plugin,method,options});
   if(plugin==='AndroidMedia')return {musicPlayerSync:false};
   if(plugin==='Spotify'){
    if(method==='getStatus')return {connected:false,clientId:'',packageName:'io.github.rdp12356.lyric',fingerprint:'AA:BB:CC'};
-   if(method==='connect'){if(options.clientId==='f'.repeat(32))throw new Error('Spotify test connection rejected');if(options.clientId==='a'.repeat(32))return new Promise(()=>{});return {connected:true,clientId:options.clientId};}
+   if(method==='connect'||method==='connectBrowser'){if(options.clientId==='f'.repeat(32))throw new Error('Spotify test connection rejected');if(options.clientId==='a'.repeat(32))return new Promise(()=>{});return {connected:true,clientId:options.clientId};}
    if(method==='getPlayback')return window.spotifyFixture;
    if(method==='control'){if(options.action==='play-pause')window.spotifyFixture.playing=!window.spotifyFixture.playing;if(options.action==='seek')window.spotifyFixture.position=options.position;}
   }
@@ -41,6 +41,7 @@ await local.getByLabel('Public Client ID').fill('f'.repeat(32));await local.getB
 await local.getByLabel('Public Client ID').fill('a'.repeat(32));await local.getByRole('button',{name:'Connect Spotify',exact:true}).click();await local.getByRole('button',{name:'Cancel login'}).click();await local.getByRole('button',{name:'Connect Spotify',exact:true}).waitFor();
 await local.getByLabel('Public Client ID').fill('0123456789abcdef0123456789abcdef');await local.getByRole('button',{name:'Connect Spotify',exact:true}).click();
 await local.getByText('Spotify Song',{exact:true}).waitFor();
+assert(await local.evaluate(()=>window.nativeCalls.some(c=>c.plugin==='Spotify'&&c.method==='connectBrowser')&&!window.nativeCalls.some(c=>c.plugin==='Spotify'&&c.method==='connect')),'Connect must delegate to browser authorization, not direct SDK login');
 await local.getByRole('button',{name:'Pause',exact:true}).click();await local.getByRole('button',{name:'Play',exact:true}).waitFor();
 await local.getByRole('slider',{name:'Playback position'}).fill('45');
 assert(await local.evaluate(()=>window.nativeCalls.some(c=>c.plugin==='Spotify'&&c.method==='control'&&c.options.action==='seek'&&c.options.position===45)));

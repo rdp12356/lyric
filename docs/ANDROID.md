@@ -1,3 +1,11 @@
+# Redirect authorization update — 1.3.0
+
+Connect Spotify now opens the system browser at Spotify Accounts. It requests only `app-remote-control` using Authorization Code + PKCE and random OAuth state. The redirect remains `http://127.0.0.1:43821/callback`, already registered for the supplied public Client ID. A temporary server binds only to the phone's loopback interface and expires after 150 seconds. The callback validates state and exchanges the code with Spotify over HTTPS without a Client Secret; returned tokens are not saved or exposed to JavaScript.
+
+After authorization, the browser attempts to open `lyric://spotify-return`. If automatic handoff is blocked by the browser, tap **Return to Lyric**. On resuming Lyric, the official App Remote SDK connects with its authorization view disabled. Only a successful SDK connection marks the app Connected. Browser authorization by itself is not playback access. The installed official Spotify app, matching Android package/SHA-1 registration, account eligibility, and SDK service connectivity are still required. This does not use the Web API to read playback and does not bypass any Spotify restriction.
+
+Cancel closes the callback listener and rejects the pending login. Errors remain visible in the settings sheet. Actual provider authorization and playback on the user's account require physical-device testing; the browser-to-SDK combination is implemented but not verified against the user's phone. If Spotify declines the scope or the SDK still cannot bind, the app reports failure rather than claiming a connection.
+
 # Lyric for Android 1.1.0
 
 The default **Local edition** plays your files and catalog previews, caches lyrics for offline use, imports LRC files, and adds optional official Spotify App Remote connectivity. It has **no notification-listener service**. The separate **Connected edition** also supports generic Android media sessions through optional notification access, which may be blocked for sideloaded apps. Keep Play Protect enabled.

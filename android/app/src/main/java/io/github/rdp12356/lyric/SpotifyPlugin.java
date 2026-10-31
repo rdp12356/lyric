@@ -46,7 +46,7 @@ public class SpotifyPlugin extends Plugin {
         } catch (Exception ignored) { return ""; }
     }
     private JSObject status() {
-        JSObject result = new JSObject(); result.put("connected", remote != null && remote.isConnected()); result.put("clientId", prefs().getString("clientId", DEFAULT_CLIENT_ID));
+        JSObject result = new JSObject(); result.put("phase", browserLogin != null ? "browser" : approvedLogin != null ? "return" : connecting.get() ? "playback" : "idle"); result.put("connected", remote != null && remote.isConnected()); result.put("clientId", prefs().getString("clientId", DEFAULT_CLIENT_ID));
         result.put("spotifyInstalled", SpotifyAppRemote.isSpotifyInstalled(getContext())); result.put("packageName", getContext().getPackageName()); result.put("fingerprint", fingerprint()); result.put("redirectUri", REDIRECT); return result;
     }
     @PluginMethod public void getStatus(PluginCall call) { call.resolve(status()); }
@@ -57,6 +57,73 @@ public class SpotifyPlugin extends Plugin {
         prefs().edit().putString("clientId", clientId).apply(); wantsConnection = true;
         getActivity().runOnUiThread(() -> connectRemote(clientId, true, call));
     }
+    private volatile java.net.ServerSocket authorizationServer;
+    private volatile PluginCall browserLogin;
+    private volatile PluginCall approvedLogin;
+    private final java.util.concurrent.atomic.AtomicInteger browserAttempt = new java.util.concurrent.atomic.AtomicInteger();
+    private String encode(String value) throws Exception { return java.net.URLEncoder.encode(value, "UTF-8"); }
+    private String nonce() { byte[] bytes=new byte[32];new java.security.SecureRandom().nextBytes(bytes);return Base64.encodeToString(bytes,Base64.URL_SAFE|Base64.NO_WRAP|Base64.NO_PADDING); }
+    @PluginMethod public void connectBrowser(PluginCall call) {
+        String client=call.getString("clientId",DEFAULT_CLIENT_ID).trim();
+        if(!client.matches("[a-fA-F0-9]{32}")){call.reject("Invalid Spotify Client ID");return;}
+        if(!SpotifyAppRemote.isSpotifyInstalled(getContext())){call.reject("Install and sign in to the official Spotify app first; browser authorization still uses that app for playback.");return;}
+        if(browserLogin!=null||connecting.get()){call.reject("A Spotify login is already in progress. Cancel it first.");return;}
+        wantsConnection=false;browserLogin=call;prefs().edit().putString("clientId",client).apply();
+        int attempt=browserAttempt.incrementAndGet();
+        new Thread(()->{
+            try(java.net.ServerSocket server=new java.net.ServerSocket()){
+                server.bind(new java.net.InetSocketAddress(java.net.InetAddress.getByName("127.0.0.1"),43821));server.setSoTimeout(150000);authorizationServer=server;
+                String verifier=nonce(),state=nonce();String challenge=Base64.encodeToString(MessageDigest.getInstance("SHA-256").digest(verifier.getBytes(java.nio.charset.StandardCharsets.US_ASCII)),Base64.URL_SAFE|Base64.NO_WRAP|Base64.NO_PADDING);
+                String url="https://accounts.spotify.com/authorize?response_type=code&client_id="+encode(client)+"&redirect_uri="+encode(REDIRECT)+"&scope=app-remote-control&code_challenge_method=S256&code_challenge="+encode(challenge)+"&state="+encode(state)+"&show_dialog=true";
+                getActivity().runOnUiThread(()->{if(attempt!=browserAttempt.get())return;try{Intent login=new Intent(Intent.ACTION_VIEW,Uri.parse(url));
+                    Intent probe=new Intent(Intent.ACTION_VIEW,Uri.parse("https://www.example.com/"));
+                    android.content.pm.ResolveInfo browser=getContext().getPackageManager().resolveActivity(probe,PackageManager.MATCH_DEFAULT_ONLY);
+                    if(browser!=null&&browser.activityInfo!=null&&!"android".equals(browser.activityInfo.packageName))login.setPackage(browser.activityInfo.packageName);
+                    getActivity().startActivity(login);}catch(Exception error){try{server.close();}catch(Exception ignored){}}});
+                long deadline=System.currentTimeMillis()+150000;
+                while(attempt==browserAttempt.get()&&System.currentTimeMillis()<deadline){
+                    server.setSoTimeout((int)Math.max(1,deadline-System.currentTimeMillis()));
+                    try(java.net.Socket socket=server.accept()){
+                        socket.setSoTimeout(5000);String line=new java.io.BufferedReader(new java.io.InputStreamReader(socket.getInputStream(),java.nio.charset.StandardCharsets.UTF_8)).readLine();
+                        if(line==null||line.length()>16000||!line.startsWith("GET ")){reply(socket,400,"Invalid request.");continue;}
+                        Uri callback=Uri.parse("http://127.0.0.1"+line.split(" ")[1]);
+                        if(!"/callback".equals(callback.getPath())){reply(socket,404,"Not found.");continue;}
+                        if(!state.equals(callback.getQueryParameter("state"))){reply(socket,400,"Login verification failed. Return to Lyric and try again.");continue;}
+                        if(callback.getQueryParameter("error")!=null){reply(socket,200,"Spotify did not authorize this request. Return to Lyric for details.");throw new java.io.IOException("Spotify declined browser authorization. Check your app/account eligibility and allowed users.");}
+                        String code=callback.getQueryParameter("code");if(code==null){reply(socket,400,"Missing authorization code.");continue;}
+                        try { verifyAuthorization(client,code,verifier); } catch(Exception error) { reply(socket,200,"Spotify authorization could not be completed. Return to Lyric to see the error."); throw error; }
+                        if(attempt!=browserAttempt.get())return;
+                        browserLogin=null;approvedLogin=call;
+                        reply(socket,200,"Browser authorization completed. Return to Lyric to finish connecting to Spotify playback.");
+                        handler.postDelayed(()->{if(approvedLogin==call){approvedLogin=null;call.reject("Authorization completed, but Lyric was not reopened. Try again and use Return to Lyric.");}},120000);
+                        return;
+                    }
+                }
+                throw new java.io.IOException("Spotify browser login timed out. Return to Lyric and try again.");
+            }catch(Exception error){if(attempt==browserAttempt.get()){browserLogin=null;call.reject(error.getMessage()==null?"Browser authorization failed":error.getMessage());}}
+            finally{if(attempt==browserAttempt.get())authorizationServer=null;}
+        },"Lyric Spotify browser authorization").start();
+    }
+    private void verifyAuthorization(String client,String code,String verifier) throws Exception {
+        java.net.HttpURLConnection connection=(java.net.HttpURLConnection)new java.net.URL("https://accounts.spotify.com/api/token").openConnection();
+        try{
+            connection.setConnectTimeout(15000);connection.setReadTimeout(15000);connection.setRequestMethod("POST");connection.setDoOutput(true);connection.setRequestProperty("Content-Type","application/x-www-form-urlencoded");
+            String form="grant_type=authorization_code&client_id="+encode(client)+"&redirect_uri="+encode(REDIRECT)+"&code="+encode(code)+"&code_verifier="+encode(verifier);
+            try(java.io.OutputStream output=connection.getOutputStream()){output.write(form.getBytes(java.nio.charset.StandardCharsets.UTF_8));}
+            if(connection.getResponseCode()!=200)throw new java.io.IOException("Spotify rejected the authorization-code exchange. Check redirect URI and account/app eligibility.");
+            // The app-remote-control grant authorizes the SDK. Do not store or expose the OAuth token.
+            try(java.io.InputStream input=connection.getInputStream()){byte[] buffer=new byte[2048];while(input.read(buffer)!=-1){}}
+        }finally{connection.disconnect();}
+    }
+    private void reply(java.net.Socket socket,int status,String text)throws Exception{
+        String page="<!doctype html><meta name='viewport' content='width=device-width'><title>Return to Lyric</title><body style='background:#15131f;color:white;font:18px sans-serif;padding:32px'><h1>Lyric</h1><p>"+text+"</p><a style='color:#c4b5fd' href='lyric://spotify-return'>Return to Lyric</a><script>setTimeout(function(){location.href='lyric://spotify-return'},500)</script></body>";
+        byte[] bytes=page.getBytes(java.nio.charset.StandardCharsets.UTF_8);java.io.OutputStream output=socket.getOutputStream();output.write(("HTTP/1.1 "+status+" OK\r\nContent-Type: text/html; charset=utf-8\r\nCache-Control: no-store\r\nConnection: close\r\nContent-Length: "+bytes.length+"\r\n\r\n").getBytes(java.nio.charset.StandardCharsets.US_ASCII));output.write(bytes);output.flush();
+    }
+    private void cancelBrowser(){
+        browserAttempt.incrementAndGet();if(authorizationServer!=null)try{authorizationServer.close();}catch(Exception ignored){}authorizationServer=null;
+        PluginCall pending=browserLogin!=null?browserLogin:approvedLogin;browserLogin=null;approvedLogin=null;if(pending!=null)pending.reject("Spotify connection cancelled");
+    }
+
     private void connectRemote(String clientId, boolean showAuth, PluginCall call) {
         if (!connecting.compareAndSet(false, true)) { if (call != null) call.reject("Spotify connection is already in progress"); return; }
         if (remote != null && remote.isConnected()) { connecting.set(false); if (call != null) call.resolve(status()); return; }
@@ -88,6 +155,7 @@ public class SpotifyPlugin extends Plugin {
         if (remote != null) SpotifyAppRemote.disconnect(remote); remote = null; latest = null;
     }
     @PluginMethod public void disconnect(PluginCall call) {
+        cancelBrowser();
         wantsConnection = false; generation++; connecting.set(false);
         PluginCall pending = pendingLogin; pendingLogin = null;
         if (pending != null) pending.reject("Spotify connection cancelled");
@@ -161,10 +229,13 @@ public class SpotifyPlugin extends Plugin {
         });
     }
     @Override protected void handleOnResume() {
+        PluginCall authorized=approvedLogin;
+        if(authorized!=null){approvedLogin=null;wantsConnection=true;getActivity().runOnUiThread(()->connectRemote(prefs().getString("clientId",DEFAULT_CLIENT_ID),false,authorized));return;}
+
         if (wantsConnection && !connecting.get() && (remote == null || !remote.isConnected())) {
             String client = prefs().getString("clientId", DEFAULT_CLIENT_ID); if (!client.isEmpty()) getActivity().runOnUiThread(() -> connectRemote(client, false, null));
         }
     }
     @Override protected void handleOnStop() { if (remote != null && remote.isConnected()) dropConnection(); }
-    @Override protected void handleOnDestroy() { wantsConnection = false; generation++; connecting.set(false); dropConnection(); handler.removeCallbacksAndMessages(null); }
+    @Override protected void handleOnDestroy() { cancelBrowser(); wantsConnection = false; generation++; connecting.set(false); dropConnection(); handler.removeCallbacksAndMessages(null); }
 }
