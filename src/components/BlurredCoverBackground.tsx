@@ -4,7 +4,7 @@ interface BlurredCoverBackgroundProps {
   coverUrl: string;
 }
 
-export const BlurredCoverBackground: React.FC<BlurredCoverBackgroundProps> = ({ coverUrl }) => {
+const BlurredCoverBackgroundComponent: React.FC<BlurredCoverBackgroundProps> = ({ coverUrl }) => {
   return (
     <div className="fixed inset-0 pointer-events-none z-0 overflow-hidden select-none bg-black">
       {/* Heavily Blurred Album Cover Art - so blurred you can barely make out the shapes */}
@@ -40,3 +40,6 @@ export const BlurredCoverBackground: React.FC<BlurredCoverBackgroundProps> = ({ 
     </div>
   );
 };
+
+// Album art is static until the song changes. Keep its GPU-heavy blur isolated.
+export const BlurredCoverBackground = React.memo(BlurredCoverBackgroundComponent);
