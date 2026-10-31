@@ -65,7 +65,7 @@ jobs:
           name: Lyric-Android-Local-debug
           path: |
             android/app/build/outputs/apk/local/debug/app-local-debug.apk
-            spotify-android-setup.txt
+            android/app/build/outputs/apk/local/debug/spotify-android-setup.txt
           if-no-files-found: error
       - uses: actions/upload-artifact@v4
         with:
