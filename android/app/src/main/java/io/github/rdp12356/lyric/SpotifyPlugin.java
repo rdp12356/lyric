@@ -112,7 +112,12 @@ public class SpotifyPlugin extends Plugin {
             try(java.io.OutputStream output=connection.getOutputStream()){output.write(form.getBytes(java.nio.charset.StandardCharsets.UTF_8));}
             if(connection.getResponseCode()!=200)throw new java.io.IOException("Spotify rejected the authorization-code exchange. Check redirect URI and account/app eligibility.");
             // The app-remote-control grant authorizes the SDK. Do not store or expose the OAuth token.
-            try(java.io.InputStream input=connection.getInputStream()){byte[] buffer=new byte[2048];while(input.read(buffer)!=-1){}}
+            try(java.io.InputStream input=connection.getInputStream();ByteArrayOutputStream body=new ByteArrayOutputStream()){
+                byte[] buffer=new byte[2048];int count;while((count=input.read(buffer))!=-1){body.write(buffer,0,count);if(body.size()>65536)throw new java.io.IOException("Invalid Spotify authorization response");}
+                org.json.JSONObject grant=new org.json.JSONObject(body.toString("UTF-8"));
+                if(grant.optString("access_token").isEmpty()||!"Bearer".equalsIgnoreCase(grant.optString("token_type")))throw new java.io.IOException("Spotify did not return a valid authorization grant");
+                String scope=grant.optString("scope");if(!scope.isEmpty()&&!java.util.Arrays.asList(scope.split(" ")).contains("app-remote-control"))throw new java.io.IOException("Spotify did not grant app remote control");
+            }
         }finally{connection.disconnect();}
     }
     private void reply(java.net.Socket socket,int status,String text)throws Exception{
