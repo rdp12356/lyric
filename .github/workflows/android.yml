@@ -33,6 +33,9 @@ jobs:
       - name: Build web assets and sync Android
         run: npm run android:sync
       - name: Check Android UI
+        id: ui
+        timeout-minutes: 8
+        continue-on-error: true
         run: |
           npm run dev -- --host 127.0.0.1 > /tmp/lyric-vite.log 2>&1 &
           for attempt in $(seq 1 30); do
@@ -72,3 +75,6 @@ jobs:
           name: Lyric-Android-Connected-debug
           path: android/app/build/outputs/apk/connected/debug/app-connected-debug.apk
           if-no-files-found: error
+      - name: Require successful UI regression tests
+        if: steps.ui.outcome != 'success'
+        run: exit 1
