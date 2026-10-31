@@ -15,7 +15,7 @@ interface SyncedLyricsViewProps {
   onRetry?: () => void;
 }
 
-export const SyncedLyricsView: React.FC<SyncedLyricsViewProps> = ({
+const SyncedLyricsViewComponent: React.FC<SyncedLyricsViewProps> = ({
   lyrics,
   currentTime,
   palette,
@@ -240,3 +240,36 @@ function isInstrumentalLine(text: string): boolean {
   const clean = text.trim();
   return clean === '♪' || clean === '♫' || /^\[(instrumental|solo)\]$/i.test(clean) || clean === '...';
 }
+
+
+// The position slider refreshes frequently, but the words only change at their
+// timestamp boundaries. Avoid re-rendering Framer Motion trees ~30 times/sec
+// when the visible lyric content has not changed.
+function visibleMoment(lyrics: LyricsData | null, seconds: number): string {
+  if (!lyrics || lyrics.lines.length === 0) return 'empty';
+  const lines = lyrics.lines;
+  let lo = 0, hi = lines.length - 1, index = -1;
+  while (lo <= hi) {
+    const mid = (lo + hi) >>> 1;
+    if (seconds >= lines[mid].time) { index = mid; lo = mid + 1; }
+    else hi = mid - 1;
+  }
+  if (index < 0) return 'prelude';
+  const words = lines[index].words || [];
+  if (!words.length) return String(index);
+  let seen = -1;
+  let past = 0;
+  for (let i = 0; i < words.length; i++) {
+    if (seconds >= words[i].start) seen = i;
+    if (seconds >= words[i].end) past++;
+  }
+  return index + ':' + seen + ':' + past;
+}
+export const SyncedLyricsView = React.memo(SyncedLyricsViewComponent, (before, after) => (
+  before.lyrics === after.lyrics &&
+  before.duration === after.duration &&
+  before.palette === after.palette &&
+  before.style === after.style &&
+  before.unavailableMessage === after.unavailableMessage &&
+  visibleMoment(before.lyrics, before.currentTime) === visibleMoment(after.lyrics, after.currentTime)
+));
