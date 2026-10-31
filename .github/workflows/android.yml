@@ -2,9 +2,9 @@ name: Android APK
 
 on:
   push:
-    branches: [main]
+    branches: [main, android-port, 'fix/spotify-android-deep-link']
   pull_request:
-    branches: [main]
+    branches: [main, android-port]
   workflow_dispatch:
 
 permissions:
