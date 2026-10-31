@@ -11,6 +11,7 @@ interface SyncedLyricsViewProps {
   style: LyricStyle;
   onSeek: (seconds: number) => void;
   onSearchOpen?: () => void;
+  unavailableMessage?: string;
 }
 
 export const SyncedLyricsView: React.FC<SyncedLyricsViewProps> = ({
@@ -19,7 +20,8 @@ export const SyncedLyricsView: React.FC<SyncedLyricsViewProps> = ({
   palette,
   style,
   onSeek,
-  onSearchOpen
+  onSearchOpen,
+  unavailableMessage
 }) => {
   // Find active line index
   const activeIndex = useMemo(() => {
@@ -89,7 +91,7 @@ export const SyncedLyricsView: React.FC<SyncedLyricsViewProps> = ({
         </div>
         <h3 className="text-xl font-bold text-white mb-1.5">No Synced Lyrics Available</h3>
         <p className="text-sm text-white/50 max-w-sm mb-5 leading-relaxed">
-          Lyrics haven't been indexed for this track on LRCLIB yet, or the song is instrumental.
+          {unavailableMessage || 'Lyrics have not been indexed for this track on LRCLIB yet, or the song is instrumental.'}
         </p>
         {onSearchOpen && (
           <button
