@@ -6,6 +6,7 @@ import android.view.View;
 import androidx.core.graphics.Insets;
 import androidx.core.view.ViewCompat;
 import androidx.core.view.WindowInsetsCompat;
+import androidx.core.view.WindowInsetsControllerCompat;
 import com.getcapacitor.BridgeActivity;
 
 public class MainActivity extends BridgeActivity {
@@ -15,6 +16,9 @@ public class MainActivity extends BridgeActivity {
         super.onCreate(savedInstanceState);
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         View content = findViewById(android.R.id.content);
+        WindowInsetsControllerCompat systemBars = new WindowInsetsControllerCompat(getWindow(), content);
+        systemBars.setAppearanceLightNavigationBars(false);
+        systemBars.setAppearanceLightStatusBars(false);
         ViewCompat.setOnApplyWindowInsetsListener(content, (view, insets) -> {
             Insets bars = insets.getInsets(WindowInsetsCompat.Type.systemBars() | WindowInsetsCompat.Type.displayCutout());
             Insets keyboard = insets.getInsets(WindowInsetsCompat.Type.ime());
