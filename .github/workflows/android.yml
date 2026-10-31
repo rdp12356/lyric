@@ -40,15 +40,32 @@ jobs:
             sleep 1
           done
           npm run test:android-ui
+      - name: Restore optional stable development signing key
+        env:
+          ANDROID_DEBUG_KEYSTORE_BASE64: ${{ secrets.ANDROID_DEBUG_KEYSTORE_BASE64 }}
+        run: |
+          python3 - <<'PYKEY'
+          import os, base64, pathlib
+          value = os.environ.get('ANDROID_DEBUG_KEYSTORE_BASE64', '')
+          if value:
+              target = pathlib.Path.home() / '.android' / 'debug.keystore'
+              target.parent.mkdir(parents=True, exist_ok=True)
+              target.write_bytes(base64.b64decode(value, validate=True))
+              target.chmod(0o600)
+          PYKEY
       - name: Build and lint APK
         working-directory: android
         run: ./gradlew assembleLocalDebug lintLocalDebug assembleConnectedDebug lintConnectedDebug --no-daemon
       - name: Verify Local APK has no notification access
         run: node scripts/verify-local-apk.cjs
+      - name: Generate Spotify Android registration details
+        run: node scripts/spotify-setup.cjs
       - uses: actions/upload-artifact@v4
         with:
           name: Lyric-Android-Local-debug
-          path: android/app/build/outputs/apk/local/debug/app-local-debug.apk
+          path: |
+            android/app/build/outputs/apk/local/debug/app-local-debug.apk
+            spotify-android-setup.txt
           if-no-files-found: error
       - uses: actions/upload-artifact@v4
         with:

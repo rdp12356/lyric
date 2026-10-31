@@ -11,6 +11,7 @@ import android.os.SystemClock;
 import android.provider.Settings;
 import android.util.Base64;
 import com.getcapacitor.JSObject;
+import com.getcapacitor.JSArray;
 import com.getcapacitor.Plugin;
 import com.getcapacitor.PluginCall;
 import com.getcapacitor.PluginMethod;
@@ -44,14 +45,16 @@ public class AndroidMediaPlugin extends Plugin {
         return manager == null ? Collections.emptyList() : manager.getActiveSessions(listener());
     }
 
-    private MediaController activeController() {
+    private MediaController activeController(String preferred) {
         MediaController fallback = null;
         for (MediaController controller : sessions()) {
             MediaMetadata metadata = controller.getMetadata();
             PlaybackState state = controller.getPlaybackState();
             if (metadata == null || state == null || metadata.getString(MediaMetadata.METADATA_KEY_TITLE) == null) continue;
+            if (!preferred.isEmpty() && preferred.equals(controller.getPackageName())) return controller;
+            if (!preferred.isEmpty()) continue;
             if (state.getState() == PlaybackState.STATE_PLAYING) return controller;
-            if (fallback == null && state.getState() == PlaybackState.STATE_PAUSED) fallback = controller;
+            if (fallback == null && state.getState() != PlaybackState.STATE_STOPPED && state.getState() != PlaybackState.STATE_NONE) fallback = controller;
         }
         return fallback;
     }
@@ -62,7 +65,16 @@ public class AndroidMediaPlugin extends Plugin {
         result.put("permissionGranted", hasAccess());
         result.put("active", false);
         try {
-            MediaController controller = activeController();
+            JSArray players = new JSArray();
+            for (MediaController player : sessions()) {
+                JSObject item = new JSObject(); item.put("packageName", player.getPackageName());
+                String label = player.getPackageName();
+                if ("com.spotify.music".equals(label)) label = "Spotify";
+                if ("com.apple.android.music".equals(label)) label = "Apple Music";
+                item.put("label", label); item.put("playing", player.getPlaybackState() != null && player.getPlaybackState().getState() == PlaybackState.STATE_PLAYING); players.put(item);
+            }
+            result.put("players", players);
+            MediaController controller = activeController(call.getString("packageName", ""));
             if (controller == null) { call.resolve(result); return; }
             MediaMetadata metadata = controller.getMetadata();
             PlaybackState state = controller.getPlaybackState();
@@ -80,9 +92,12 @@ public class AndroidMediaPlugin extends Plugin {
             result.put("active", true);
             result.put("packageName", controller.getPackageName());
             result.put("title", title);
+            result.put("trackId", metadata.getString(MediaMetadata.METADATA_KEY_MEDIA_ID));
             result.put("artist", artist == null ? "" : artist);
             result.put("album", album == null ? "" : album);
             result.put("playing", playing);
+            result.put("speed", state.getPlaybackSpeed());
+            result.put("canSeek", (state.getActions() & PlaybackState.ACTION_SEEK_TO) != 0);
             result.put("position", Math.max(0, position) / 1000.0);
             result.put("duration", duration / 1000.0);
             Bitmap artwork = metadata.getBitmap(MediaMetadata.METADATA_KEY_ALBUM_ART);
@@ -134,7 +149,7 @@ public class AndroidMediaPlugin extends Plugin {
     @PluginMethod
     public void control(PluginCall call) {
         try {
-            MediaController controller = activeController();
+            MediaController controller = activeController(call.getString("packageName", ""));
             if (controller == null) { call.reject("No active music player"); return; }
             String action = call.getString("action", "");
             MediaController.TransportControls controls = controller.getTransportControls();

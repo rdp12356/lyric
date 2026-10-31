@@ -1,4 +1,5 @@
 import { LyricsData } from '../types';
+import { cachedLyrics, cacheLyrics, lyricsKey } from './lyricsCache';
 import { parseLRC, convertPlainToEstimatedLines } from './lrcParser';
 
 interface LrclibRecord {
@@ -27,7 +28,14 @@ export async function fetchLyricsFromLRCLIB(
   // Normalize key for caching
   const cleanTrack = trackName.trim().replace(/\(feat\..*?\)/i, '').replace(/\[.*?\]/g, '').trim();
   const cleanArtist = artistName.trim().split(/[,&]/)[0].trim();
-  const cacheKey = `${cleanTrack.toLowerCase()}|${cleanArtist.toLowerCase()}`;
+  const cacheKey = lyricsKey(cleanTrack, cleanArtist, albumName, duration);
+  const stored = cachedLyrics(cacheKey);
+  if (stored) return stored;
+  const normalize = (s: string) => s.toLowerCase().replace(/[^\p{L}\p{N}]/gu, "");
+  const pick = (records: LrclibRecord[]) => records.filter(r => {
+    const title = normalize(r.trackName || r.name || ""), artist = normalize(r.artistName || "");
+    return title === normalize(cleanTrack) && (!cleanArtist || artist.includes(normalize(cleanArtist)));
+  }).sort((a, b) => (duration ? Math.abs(a.duration - duration) - Math.abs(b.duration - duration) : 0) + (a.syncedLyrics ? 0 : 30) - (b.syncedLyrics ? 0 : 30))[0] || null;
 
   if (lyricsCache.has(cacheKey)) {
     return lyricsCache.get(cacheKey)!;
@@ -64,7 +72,7 @@ export async function fetchLyricsFromLRCLIB(
         const searchResults: LrclibRecord[] = await searchRes.json();
         if (searchResults && searchResults.length > 0) {
           // Prefer record with syncedLyrics
-          record = searchResults.find(r => r.syncedLyrics) || searchResults[0];
+          record = pick(searchResults);
         }
       }
     }
@@ -77,7 +85,7 @@ export async function fetchLyricsFromLRCLIB(
       if (broadRes.ok) {
         const broadResults: LrclibRecord[] = await broadRes.json();
         if (broadResults && broadResults.length > 0) {
-          record = broadResults.find(r => r.syncedLyrics) || broadResults[0];
+          record = pick(broadResults);
         }
       }
     }
@@ -118,6 +126,7 @@ export async function fetchLyricsFromLRCLIB(
     }
 
     lyricsCache.set(cacheKey, lyricsData);
+    cacheLyrics(cacheKey, lyricsData);
     return lyricsData;
   } catch (err) {
     console.error('Error fetching lyrics from LRCLIB:', err);

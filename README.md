@@ -1,6 +1,6 @@
 # Lyric ✦ Open-Source Ambient Rim Lighting & Kinetic Synced Lyrics
 
-**Android port:** See [Android installation, permissions, and build instructions](docs/ANDROID.md). The default Local edition supports local audio and LRC import without notification access. Native media-session sync is available in the separate Connected edition.
+**Android port:** See [Android installation, permissions, and build instructions](docs/ANDROID.md). Version 1.1 adds measured beat-reactive edges, saved calibration, a local queue, offline lyrics, focus mode, and optional official Spotify Android SDK connectivity in Local without notification access. Generic media-session sync remains in Connected.
 
 <div align="center">
 

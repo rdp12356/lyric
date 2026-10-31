@@ -1,0 +1,11 @@
+const {execFileSync}=require('node:child_process');
+const {join}=require('node:path');
+const {writeFileSync}=require('node:fs');
+const sdk=process.env.ANDROID_HOME||process.env.ANDROID_SDK_ROOT;
+const apk='android/app/build/outputs/apk/local/debug/app-local-debug.apk';
+const report=execFileSync(join(sdk,'build-tools/34.0.0/apksigner'),['verify','--print-certs',apk],{encoding:'utf8'});
+const digest=report.match(/certificate SHA-1 digest:\s*([0-9a-f]+)/i)?.[1];
+if(!digest)throw new Error('Could not read APK signing fingerprint');
+const fingerprint=digest.match(/.{2}/g).join(':').toUpperCase();
+writeFileSync('spotify-android-setup.txt',`Lyric Android 1.1.0 — Spotify App Remote setup\n\nSelect Android in your Spotify developer app.\nPublic Client ID: enter it in Lyric > Sources & settings > Spotify app.\nClient Secret: NOT required.\n\nRedirect URI: http://127.0.0.1:43821/callback\nAndroid package: io.github.rdp12356.lyric\nSHA-1 for this APK: ${fingerprint}\n\nInstall the official Spotify app, sign in, and play music before connecting.\nThis uses Spotify App Remote, not Web API or Web Playback SDK.\nSpotify controls remain subject to account/track restrictions.\nA live connection on a Free account still requires device testing.\n\nDebug builds can have different signing fingerprints. Use the fingerprint for the APK you install.\nThe same fingerprint is shown in Lyric settings.\nIf Android rejects an update because of a signing mismatch, uninstall the previous test APK first; this removes its app-local preferences and lyric cache.\n\nMicrophone lighting hears music through speakers, not private headphone audio.\nLocal-file lighting uses the file's audio spectrum. No audio is uploaded.\n`);
+console.log('Wrote public Spotify package/fingerprint setup file.');

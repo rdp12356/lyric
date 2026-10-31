@@ -1,10 +1,10 @@
-import React, { useMemo } from 'react';
+import React from 'react';
 import { ColorPalette, RimLightConfig } from '../types';
 
 interface AmbientRimLightsProps {
   config: RimLightConfig;
   palette: ColorPalette;
-  audioEnergy: { bass: number; mid: number; treble: number; overall: number };
+  audioEnergy: { bass: number; mid: number; treble: number; overall: number; beat?: number };
   isPlaying: boolean;
 }
 
@@ -17,16 +17,11 @@ export const AmbientRimLights: React.FC<AmbientRimLightsProps> = ({
   if (!config.enabled) return null;
 
   // Dynamic beat multiplier based on audio FFT and reactivity slider
-  const beatScale = useMemo(() => {
-    if (!isPlaying) return 1.0;
-    const factor = config.beatReactivity * 1.5;
-    // Bass energy adds punch
-    return 1.0 + audioEnergy.bass * factor;
-  }, [isPlaying, config.beatReactivity, audioEnergy.bass]);
+  const beatScale = isPlaying ? 1 + config.beatReactivity * (audioEnergy.bass * 1.1 + (audioEnergy.beat || 0) * 0.4) : 1;
 
   const effectiveThickness = Math.max(2, Math.round(config.thickness * (isPlaying ? 0.9 + audioEnergy.overall * 0.3 : 1.0)));
   const effectiveBlur = Math.round(config.blur * beatScale);
-  const effectiveOpacity = Math.min(1.0, config.intensity * (isPlaying ? 0.75 + audioEnergy.bass * 0.45 : 0.85));
+  const effectiveOpacity = Math.min(1.0, config.intensity * (config.mode === 'static' ? 0.55 : isPlaying ? 0.08 + audioEnergy.overall * 0.8 + audioEnergy.bass * 0.45 + (audioEnergy.beat || 0) * 0.25 : 0.12));
 
   // Mode-specific styles
   const getGlowStyles = () => {
@@ -112,7 +107,7 @@ export const AmbientRimLights: React.FC<AmbientRimLightsProps> = ({
         style={{
           background: `linear-gradient(90deg, transparent 0%, ${palette.secondary} 25%, ${palette.accent} 50%, ${palette.dominant} 75%, transparent 100%)`,
           height: `${effectiveThickness}px`,
-          opacity: effectiveOpacity * 0.95,
+          opacity: effectiveOpacity * (0.55 + audioEnergy.treble * 0.45),
           filter: `blur(${Math.max(2, effectiveThickness * 0.75)}px)`
         }}
       />
@@ -123,7 +118,7 @@ export const AmbientRimLights: React.FC<AmbientRimLightsProps> = ({
         style={{
           background: `linear-gradient(90deg, transparent 0%, ${palette.dominant} 25%, ${palette.accent} 50%, ${palette.secondary} 75%, transparent 100%)`,
           height: `${effectiveThickness}px`,
-          opacity: effectiveOpacity * 0.95,
+          opacity: effectiveOpacity * (0.55 + audioEnergy.bass * 0.45),
           filter: `blur(${Math.max(2, effectiveThickness * 0.75)}px)`
         }}
       />
@@ -134,7 +129,7 @@ export const AmbientRimLights: React.FC<AmbientRimLightsProps> = ({
         style={{
           background: `linear-gradient(180deg, transparent 0%, ${palette.accent} 35%, ${palette.secondary} 70%, transparent 100%)`,
           width: `${effectiveThickness}px`,
-          opacity: effectiveOpacity * 0.95,
+          opacity: effectiveOpacity * (0.6 + audioEnergy.mid * 0.4),
           filter: `blur(${Math.max(2, effectiveThickness * 0.75)}px)`
         }}
       />
@@ -145,7 +140,7 @@ export const AmbientRimLights: React.FC<AmbientRimLightsProps> = ({
         style={{
           background: `linear-gradient(180deg, transparent 0%, ${palette.secondary} 35%, ${palette.accent} 70%, transparent 100%)`,
           width: `${effectiveThickness}px`,
-          opacity: effectiveOpacity * 0.95,
+          opacity: effectiveOpacity * (0.6 + audioEnergy.bass * 0.4),
           filter: `blur(${Math.max(2, effectiveThickness * 0.75)}px)`
         }}
       />

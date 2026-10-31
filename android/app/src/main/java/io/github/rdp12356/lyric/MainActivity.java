@@ -7,12 +7,15 @@ import androidx.core.graphics.Insets;
 import androidx.core.view.ViewCompat;
 import androidx.core.view.WindowInsetsCompat;
 import androidx.core.view.WindowInsetsControllerCompat;
+import androidx.activity.OnBackPressedCallback;
 import com.getcapacitor.BridgeActivity;
 
 public class MainActivity extends BridgeActivity {
     @Override
     public void onCreate(Bundle savedInstanceState) {
         registerPlugin(AndroidMediaPlugin.class);
+        registerPlugin(SpotifyPlugin.class);
+        registerPlugin(AudioInputPlugin.class);
         super.onCreate(savedInstanceState);
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         View content = findViewById(android.R.id.content);
@@ -26,5 +29,18 @@ public class MainActivity extends BridgeActivity {
             return WindowInsetsCompat.CONSUMED;
         });
         ViewCompat.requestApplyInsets(content);
+        getOnBackPressedDispatcher().addCallback(this, new OnBackPressedCallback(true) {
+            @Override public void handleOnBackPressed() {
+                if (getBridge() == null) { delegateBack(); return; }
+                getBridge().getWebView().evaluateJavascript("!window.dispatchEvent(new Event('lyric-back', {cancelable:true}))", handled -> {
+                    if (!"true".equals(handled)) delegateBack();
+                });
+            }
+            private void delegateBack() {
+                setEnabled(false);
+                getOnBackPressedDispatcher().onBackPressed();
+                setEnabled(true);
+            }
+        });
     }
 }
