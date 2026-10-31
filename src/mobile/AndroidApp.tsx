@@ -4,7 +4,7 @@ import { AmbientRimLights } from '../components/AmbientRimLights';
 import { BlurredCoverBackground } from '../components/BlurredCoverBackground';
 import { SyncedLyricsView } from '../components/SyncedLyricsView';
 import { TrackSearchModal } from '../components/TrackSearchModal';
-import { AndroidMedia, isAndroid } from '../services/androidMedia';
+import { AndroidMedia, isAndroid, type AndroidPlayback } from '../services/androidMedia';
 import { Spotify } from '../services/spotify';
 import { AudioInput, WebMicrophone } from '../services/audioInput';
 import { createTrackFromFile, DEMO_TRACKS, visualizerEngine } from '../services/audioManager';
@@ -81,6 +81,7 @@ export default function AndroidApp() {
   const fileInput = useRef<HTMLInputElement>(null);
   const lrcInput = useRef<HTMLInputElement>(null);
   const importedLyrics = useRef(false);
+  const eventRevision = useRef(0);
   const rim = prefs.rim;
   const activePalette = rim.palettePreset === 'album-art' ? palette : PRESET_PALETTES[rim.palettePreset] || palette;
 
@@ -184,6 +185,62 @@ export default function AndroidApp() {
     frame = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(frame);
   }, [duration, micActive]);
+  const applyPlayback = useCallback((state: AndroidPlayback, player: 'spotify' | 'device', transportMs: number) => {
+    if (sourceRef.current !== player) return;
+    setPermission(state.permissionGranted);
+    if (state.players) setPlayers(state.players);
+    if (state.active && state.title) {
+      const trackId = `${player}:${state.packageName}:${state.trackId || [state.title, state.artist, state.album, Math.round(state.duration || 0)].join('|')}`;
+      const changed = trackRef.current?.id !== trackId;
+      if (changed) {
+        importedLyrics.current = false;
+        setError(''); setLyrics(null); setLyricsIssue('');
+        const next: Track = {
+          id: trackId, title: state.title, artist: state.artist || '',
+          album: state.album || '', albumArt: state.artwork || '',
+          duration: state.duration || 0, position: state.position || 0,
+          source: player === 'spotify' ? 'spotify-web' : 'android-media',
+          isPlaying: !!state.playing
+        };
+        trackRef.current = next;
+        setTrack(next);
+      } else if (state.artwork && trackRef.current?.albumArt !== state.artwork) {
+        trackRef.current = { ...trackRef.current!, albumArt: state.artwork };
+        setTrack(trackRef.current);
+      }
+      setDuration(state.duration || 0);
+      setCanSeek(state.canSeek !== false);
+      if (changed) clock.current.reset(state.position || 0, !!state.playing, state.speed ?? 1);
+      else clock.current.update(state.position || 0, !!state.playing, state.speed ?? 1, transportMs);
+      setPlaying(!!state.playing);
+      setPosition(clock.current.now());
+    } else {
+      // Spotify may briefly report an empty track between songs; never retain stale lyrics.
+      trackRef.current = null;
+      setTrack(null); setLyrics(null); setDuration(0);
+      clock.current.reset(0, false); setPlaying(false); setPosition(0);
+    }
+  }, []);
+
+  // Native Spotify state subscription updates song changes and pause/play immediately.
+  // Periodic polling below remains as a safety net for artwork and position drift.
+  useEffect(() => {
+    if (!isAndroid || source !== 'spotify' || !spotifyConnected) return;
+    let cancelled = false;
+    let listener: { remove(): Promise<void> } | null = null;
+    try {
+      void Spotify.addListener('playerState', state => {
+        if (cancelled || document.hidden) return;
+        eventRevision.current++;
+        applyPlayback(state, 'spotify', 0);
+      }).then(handle => {
+        if (cancelled) void handle.remove();
+        else listener = handle;
+      }).catch(() => { /* Older APKs still work using the polling fallback. */ });
+    } catch { /* Browser-only test environments may not implement native listeners. */ }
+    return () => { cancelled = true; if (listener) void listener.remove(); };
+  }, [source, spotifyConnected, applyPlayback]);
+
   useEffect(() => {
     if (source !== 'device' && source !== 'spotify') return;
     if (source === 'spotify' && !spotifyConnected) return;
@@ -192,33 +249,44 @@ export default function AndroidApp() {
     audio.current?.pause();
     const poll = async () => {
       if (cancelled || document.hidden || inFlight) return;
-      inFlight = true; let delay = source === 'spotify' ? 800 : 600;
+      inFlight = true;
+      const revisionBeforeRequest = eventRevision.current;
+      let delay = source === 'spotify' ? 1400 : 650;
       try {
-        const before = performance.now();
-        const state = source === 'spotify' ? await Spotify.getPlayback() : await AndroidMedia.getPlayback({ packageName: prefs.preferredPlayer });
+        const started = performance.now();
+        const state = source === 'spotify'
+          ? await Spotify.getPlayback()
+          : await AndroidMedia.getPlayback({ packageName: prefs.preferredPlayer });
         if (cancelled) return;
-        const roundtrip = performance.now() - before; setLatency(Math.round(roundtrip));
-        if (state.retryAfterMs) { delay = Math.max(1500, state.retryAfterMs); setError('Spotify is rate-limiting updates. Waiting before retrying.'); return; }
-        failures = 0; setPermission(state.permissionGranted); setPlayers(state.players || []);
-        if (state.active && state.title) {
-          const id = `${source}:${state.packageName}:${state.trackId || [state.title,state.artist,state.album,Math.round(state.duration || 0)].join("|")}`;
-          const changed = trackRef.current?.id !== id;
-          if (changed) {
-            importedLyrics.current = false; setError(''); setLyrics(null);
-            setTrack({ id, title: state.title, artist: state.artist || '', album: state.album || '', albumArt: state.artwork || '', duration: state.duration || 0, position: state.position || 0, source: source === 'spotify' ? 'spotify-web' : 'android-media', isPlaying: !!state.playing });
-          } else if (state.artwork && trackRef.current!.albumArt !== state.artwork) setTrack(t => t && ({...t, albumArt: state.artwork!}));
-          setDuration(state.duration || 0); setCanSeek(state.canSeek !== false);
-          sync(state.position || 0, !!state.playing, state.speed ?? 1, roundtrip, changed);
-        } else { setTrack(null); setLyrics(null); sync(0, false, 1, 0, true); }
+        // Do not overwrite a newer Spotify push event with an older network/bridge response.
+        if (source === 'spotify' && revisionBeforeRequest !== eventRevision.current) return;
+        const roundtrip = performance.now() - started;
+        setLatency(Math.round(roundtrip));
+        if (state.retryAfterMs) {
+          delay = Math.max(1500, state.retryAfterMs);
+          setError('Spotify has temporarily limited updates. Retrying automatically.');
+          return;
+        }
+        failures = 0;
+        applyPlayback(state, source, roundtrip);
       } catch (problem) {
-        if (!cancelled) { failures++; delay = Math.min(15000, delay * 2 ** Math.min(4, failures)); if (failures >= 3) { setError(message(problem, 'Could not read your player. Check your connection in Sources.')); sync(clock.current.now(), false); } }
-      } finally { inFlight = false; if (!cancelled && !document.hidden) timer = setTimeout(poll, delay); }
+        if (!cancelled) {
+          failures++; delay = Math.min(15000, delay * 2 ** Math.min(4, failures));
+          if (failures >= 3) {
+            setError(message(problem, 'Could not read your player. Check its connection in Sources.'));
+            clock.current.reset(clock.current.now(), false); setPlaying(false);
+          }
+        }
+      } finally {
+        inFlight = false;
+        if (!cancelled && !document.hidden) timer = setTimeout(poll, delay);
+      }
     };
     const visible = () => { clearTimeout(timer); if (!document.hidden) void poll(); };
-    document.addEventListener('visibilitychange', visible); void poll();
+    document.addEventListener('visibilitychange', visible);
+    void poll();
     return () => { cancelled = true; clearTimeout(timer); document.removeEventListener('visibilitychange', visible); };
-  }, [source, prefs.preferredPlayer, spotifyConnected]);
-
+  }, [source, prefs.preferredPlayer, spotifyConnected, applyPlayback]);
   useEffect(() => {
     if (!track) return;
     let cancelled = false;
@@ -437,7 +505,7 @@ export default function AndroidApp() {
     <input aria-label="LRC lyrics file" ref={lrcInput} type="file" accept=".lrc,text/plain" hidden onChange={e => { const f = e.target.files?.[0]; if (f) void loadLrc(f); e.target.value = ''; }}/>
     <TrackSearchModal isOpen={search} previewsOnly lyricsOnly={searchForLyrics} onClose={() => setSearch(false)} onSelectTrack={t => void selectSearchResult(t)}/>
     {queueOpen && <Sheet title="Your queue" onClose={closeQueue}><p className="mobile-note">Add multiple audio files. Files remain available while the app is open.</p><button className="mobile-primary" onClick={() => fileInput.current?.click()}><Upload size={17}/> Add songs</button><label className="mobile-switch">Repeat queue<input type="checkbox" checked={repeat} onChange={e => setRepeat(e.target.checked)}/></label>{queue.length ? queue.map((item, index) => <button key={`${item.id}-${index}`} className={`mobile-queue-row ${track?.id === item.id ? 'active' : ''}`} onClick={() => { void selectTrack(item); setQueueOpen(false); }}><span>{String(index+1).padStart(2,'0')}</span><div><strong>{item.title}</strong><small>{item.artist}</small></div>{track?.id === item.id && <Music2 size={18}/>}</button>) : <p className="mobile-note">Your queue is empty. Choose a few songs to start listening.</p>}</Sheet>}
-    {calibration && <Sheet title="Lyric calibration" onClose={closeCalibration}><p className="mobile-note">Tap a line exactly when you hear its first word. Calibration is saved for this song. Word timings are estimated unless your LRC contains word timestamps.</p><div className="mobile-calibration"><button onClick={() => changeOffset(offset - 50)}>−50ms</button><strong>{offset > 0 ? '+' : ''}{offset}ms</strong><button onClick={() => changeOffset(offset + 50)}>+50ms</button></div><button className="mobile-secondary" onClick={() => changeOffset(0)}>Reset calibration</button>{source !== 'local' && source !== 'manual' && <p className="mobile-note">Last API round trip: {latency}ms. Updates: {source === 'spotify' ? 'about every 800ms' : 'about every 600ms'}; the lyric clock advances between updates.</p>}<div className="mobile-calibration-lines">{lyrics?.lines.map(line => <button key={line.id} className={position + offset/1000 >= line.time && position + offset/1000 < line.endTime ? 'active' : ''} onClick={() => changeOffset((line.time - position) * 1000)}><span>{time(line.time)}</span>{line.text || 'Instrumental'}</button>)}</div></Sheet>}
+    {calibration && <Sheet title="Lyric calibration" onClose={closeCalibration}><p className="mobile-note">Tap a line exactly when you hear its first word. Calibration is saved for this song. Word timings are estimated unless your LRC contains word timestamps.</p><div className="mobile-calibration"><button onClick={() => changeOffset(offset - 50)}>−50ms</button><strong>{offset > 0 ? '+' : ''}{offset}ms</strong><button onClick={() => changeOffset(offset + 50)}>+50ms</button></div><button className="mobile-secondary" onClick={() => changeOffset(0)}>Reset calibration</button>{source !== 'local' && source !== 'manual' && <p className="mobile-note">Last API round trip: {latency}ms. Updates: {source === 'spotify' ? 'event-driven, with ~1.4s calibration' : 'about every 650ms'}; the lyric clock advances between updates.</p>}<div className="mobile-calibration-lines">{lyrics?.lines.map(line => <button key={line.id} className={position + offset/1000 >= line.time && position + offset/1000 < line.endTime ? 'active' : ''} onClick={() => changeOffset((line.time - position) * 1000)}><span>{time(line.time)}</span>{line.text || 'Instrumental'}</button>)}</div></Sheet>}
     {settings && <Sheet title="Sources & settings" onClose={closeSettings}>
       <>{error && <div className="mobile-error" role="alert"><span>{error}</span><button aria-label="Dismiss connection error" onClick={() => setError('')}><X size={18}/></button></div>}</><section className="mobile-settings-section"><h3>Your music</h3><button className="mobile-secondary" onClick={() => { setSettings(false); fileInput.current?.click(); }}><Upload size={17}/> Choose audio files</button><button className="mobile-secondary" onClick={() => { setSettings(false); openSearch(true); }}>Manual lyrics for another player</button>{source === 'manual' && <p className="mobile-note">Manual mode doesn’t control Spotify. Match the playhead to your music and start the lyric clock.</p>}
       {track && <><button className="mobile-secondary" onClick={() => lrcInput.current?.click()}>Import LRC lyrics</button><button className="mobile-secondary" onClick={() => {setSettings(false);setCalibration(true);}}>Calibrate this song</button>{source === 'local' && <div className="mobile-metadata"><label>Song title<input value={track.title} onChange={e => { importedLyrics.current = false; setTrack({...track,title:e.target.value}); }}/></label><label>Artist<input value={track.artist} onChange={e => { importedLyrics.current = false; setTrack({...track,artist:e.target.value}); }}/></label></div>}</>}
