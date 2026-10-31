@@ -93,6 +93,7 @@ public class SpotifyPlugin extends Plugin {
     private static final String SESSION_DEADLINE = "oauthDeadline";
     private volatile PluginCall browserLogin;
     private volatile boolean exchangingAuthorization;
+    private volatile boolean rememberAfterAuthorization;
     private final java.util.concurrent.atomic.AtomicInteger browserAttempt = new java.util.concurrent.atomic.AtomicInteger();
 
     private String encode(String value) throws Exception { return java.net.URLEncoder.encode(value, "UTF-8"); }
@@ -122,6 +123,7 @@ public class SpotifyPlugin extends Plugin {
             return;
         }
         wantsConnection = false;
+        rememberAfterAuthorization = false;
         browserLogin = call;
         prefs().edit().putString("clientId", client).apply();
         int attempt = browserAttempt.incrementAndGet();
@@ -222,6 +224,7 @@ public class SpotifyPlugin extends Plugin {
                 handler.post(() -> {
                     if (attempt != browserAttempt.get()) return;
                     exchangingAuthorization = false;
+                    rememberAfterAuthorization = true;
                     wantsConnection = true;
                     connectRemote(client, false, call);
                 });
@@ -270,7 +273,8 @@ public class SpotifyPlugin extends Plugin {
                 @Override public void onConnected(SpotifyAppRemote value) {
                     if (attempt != generation || !wantsConnection) { SpotifyAppRemote.disconnect(value); return; }
                     handler.removeCallbacks(timeout); pendingLogin = null; remote = value; connecting.set(false);
-                    if (call != null) prefs().edit().putBoolean(PREF_AUTO_RECONNECT, true).apply();
+                    if (call != null || rememberAfterAuthorization) prefs().edit().putBoolean(PREF_AUTO_RECONNECT, true).apply();
+                    rememberAfterAuthorization = false;
                     subscription = remote.getPlayerApi().subscribeToPlayerState();
                     subscription.setEventCallback(state -> latest = state);
                     subscription.setErrorCallback(error -> latest = null);
@@ -278,11 +282,11 @@ public class SpotifyPlugin extends Plugin {
                 }
                 @Override public void onFailure(Throwable error) {
                     if (attempt != generation) return;
-                    handler.removeCallbacks(timeout); pendingLogin = null; connecting.set(false); remote = null;
+                    handler.removeCallbacks(timeout); pendingLogin = null; connecting.set(false); remote = null; rememberAfterAuthorization = false;
                     if (call != null) call.reject("Spotify connection failed (" + error.getClass().getSimpleName() + "). Check that Spotify is installed, your Client ID is registered for Android, and the package name and SHA-1 match this APK.");
                 }
             });
-        } catch (Exception error) { handler.removeCallbacks(timeout); connecting.set(false); if (call != null) call.reject("Could not open Spotify. Install the official Spotify app first."); }
+        } catch (Exception error) { handler.removeCallbacks(timeout); connecting.set(false); rememberAfterAuthorization = false; if (call != null) call.reject("Could not open Spotify. Install the official Spotify app first."); }
     }
     private void dropConnection() {
         if (subscription != null) subscription.cancel(); subscription = null;
@@ -290,7 +294,8 @@ public class SpotifyPlugin extends Plugin {
     }
     @PluginMethod public void disconnect(PluginCall call) {
         cancelBrowser();
-        wantsConnection = false; prefs().edit().putBoolean(PREF_AUTO_RECONNECT, false).apply();
+        wantsConnection = false; rememberAfterAuthorization = false;
+        prefs().edit().putBoolean(PREF_AUTO_RECONNECT, false).apply();
         generation++; connecting.set(false);
         PluginCall pending = pendingLogin; pendingLogin = null;
         if (pending != null) pending.reject("Spotify connection cancelled");
