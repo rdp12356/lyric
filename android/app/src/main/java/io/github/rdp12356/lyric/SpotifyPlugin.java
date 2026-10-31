@@ -72,7 +72,7 @@ public class SpotifyPlugin extends Plugin {
         int attempt=browserAttempt.incrementAndGet();
         new Thread(()->{
             try(java.net.ServerSocket server=new java.net.ServerSocket()){
-                server.bind(new java.net.InetSocketAddress(java.net.InetAddress.getByName("127.0.0.1"),43821));server.setSoTimeout(150000);authorizationServer=server;
+                server.setReuseAddress(true);server.bind(new java.net.InetSocketAddress(java.net.InetAddress.getByName("127.0.0.1"),43821));server.setSoTimeout(150000);authorizationServer=server;
                 String verifier=nonce(),state=nonce();String challenge=Base64.encodeToString(MessageDigest.getInstance("SHA-256").digest(verifier.getBytes(java.nio.charset.StandardCharsets.US_ASCII)),Base64.URL_SAFE|Base64.NO_WRAP|Base64.NO_PADDING);
                 String url="https://accounts.spotify.com/authorize?response_type=code&client_id="+encode(client)+"&redirect_uri="+encode(REDIRECT)+"&scope=app-remote-control&code_challenge_method=S256&code_challenge="+encode(challenge)+"&state="+encode(state)+"&show_dialog=true";
                 getActivity().runOnUiThread(()->{if(attempt!=browserAttempt.get())return;try{Intent login=new Intent(Intent.ACTION_VIEW,Uri.parse(url));
