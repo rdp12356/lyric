@@ -9,7 +9,7 @@ import { Spotify } from '../services/spotify';
 import { AudioInput, WebMicrophone } from '../services/audioInput';
 import { createTrackFromFile, DEMO_TRACKS, visualizerEngine } from '../services/audioManager';
 import { extractPaletteFromImage, PRESET_PALETTES } from '../services/colorExtractor';
-import { fetchLyricsFromLRCLIB } from '../services/lrclib';
+import { lookupLyricsFromLRCLIB, type LyricsLookupIssue } from '../services/lrclib';
 import { cacheLyrics, cachedLyrics, lyricsKey } from '../services/lyricsCache';
 import { parseLRC } from '../services/lrcParser';
 import { BeatEnvelope, SILENCE, AudioEnergy } from '../services/beatEnvelope';
@@ -33,6 +33,7 @@ export default function AndroidApp() {
   const [duration, setDuration] = useState(0);
   const [lyrics, setLyrics] = useState<LyricsData | null>(null);
   const [loading, setLoading] = useState(false);
+  const [lyricsIssue, setLyricsIssue] = useState('');
   const [source, setSource] = useState<Source>('local');
   const [supportsMusicSync, setSupportsMusicSync] = useState(false);
   const [permission, setPermission] = useState(false);
@@ -177,15 +178,34 @@ export default function AndroidApp() {
   useEffect(() => {
     if (!track || importedLyrics.current) return;
     let cancelled = false;
+    setLyricsIssue('');
     const cached = cachedLyrics(lyricsKey(track.title, track.artist, track.album, duration));
     if (cached) { setLyrics(cached); setLoading(false); return; }
     setLoading(true);
+    const descriptions: Record<LyricsLookupIssue, string> = {
+      'not-found': 'No matching lyrics were found on LRCLIB for this song. Try Search Alternative Releases or import an LRC file.',
+      'instrumental': 'LRCLIB marks this recording as instrumental.',
+      'network': 'Could not reach LRCLIB. Check your internet connection and switch songs to retry.',
+      'rate-limited': 'LRCLIB is temporarily rate-limiting requests. Try again shortly.',
+      'service-error': 'LRCLIB is temporarily unavailable. Try again later or import an LRC file.'
+    };
     const timer = setTimeout(() => {
-      void fetchLyricsFromLRCLIB(track.title, track.artist, track.album, duration).then(value => { if (!cancelled && !importedLyrics.current) { setLyrics(value); setLoading(false); } });
+      void lookupLyricsFromLRCLIB(track.title, track.artist, track.album, duration)
+        .then(result => {
+          if (cancelled || importedLyrics.current) return;
+          setLyrics(result.lyrics);
+          setLyricsIssue(result.issue ? descriptions[result.issue] + (result.issue === 'rate-limited' && result.retryAfterSeconds ? ' Retry after ' + result.retryAfterSeconds + 's.' : '') : '');
+          setLoading(false);
+        })
+        .catch(() => {
+          if (cancelled || importedLyrics.current) return;
+          setLyrics(null);
+          setLyricsIssue('Could not retrieve lyrics. Check your connection and try another song.');
+          setLoading(false);
+        });
     }, 250);
     return () => { cancelled = true; clearTimeout(timer); };
   }, [track?.id, track?.title, track?.artist, duration]);
-
   const stopMic = useCallback(() => { if (isAndroid) void AudioInput.stop().catch(() => {}); else microphone.current.stop(); micEnergy.current = SILENCE; setMicActive(false); }, []);
   useEffect(() => {
     if (!micActive || !isAndroid) return;
@@ -314,7 +334,7 @@ export default function AndroidApp() {
         {isAndroid && <button className="mobile-secondary" onClick={() => setSettings(true)}><Radio size={17}/> Connect music</button>}
         <button className="mobile-text-button" onClick={() => { setQueue(DEMO_TRACKS); void selectTrack(DEMO_TRACKS[0]); }}>Try a song preview</button>
         <button className="mobile-text-button" onClick={() => openSearch(true)}>Find lyrics for another player</button>
-      </div> : loading && !lyrics ? <div className="mobile-welcome"><Music2 className="animate-pulse" size={32}/><p>Finding the words…</p></div> : <SyncedLyricsView lyrics={lyrics} currentTime={Math.max(0, position + offset / 1000)} duration={duration} palette={activePalette} style={prefs.style} onSeek={s => void seek(s)} onSearchOpen={() => openSearch(source !== 'local')} />}
+      </div> : loading && !lyrics ? <div className="mobile-welcome"><Music2 className="animate-pulse" size={32}/><p>Finding the words…</p></div> : <SyncedLyricsView lyrics={lyrics} currentTime={Math.max(0, position + offset / 1000)} duration={duration} palette={activePalette} style={prefs.style} unavailableMessage={lyricsIssue} onSeek={s => void seek(s)} onSearchOpen={() => openSearch(source !== 'local')} />}
     </main>
     {error && <div className="mobile-error" role="alert"><span>{error}</span><button aria-label="Dismiss error" onClick={() => setError('')}><X size={18}/></button></div>}
     {track && !focus && <section className="mobile-player glass-panel" aria-label="Music player">
