@@ -192,23 +192,19 @@ const SyncedLyricsViewComponent: React.FC<SyncedLyricsViewProps> = ({
                 const isPast = currentTime >= w.end;
 
                 return (
-                  <motion.span
+                  <span
                     key={wIdx}
-                    animate={{
-                      scale: isCurrent ? 1.15 : 1.0,
-                      color: isCurrent ? '#ffffff' : isPast ? '#ffffff' : 'rgba(255, 255, 255, 0.25)'
+                    style={{
+                      transform: isCurrent ? 'translate3d(0,-2px,0) scale(1.1)' : 'translate3d(0,0,0) scale(1)',
+                      color: isCurrent || isPast ? '#ffffff' : 'rgba(255,255,255,0.25)',
+                      transition: 'transform 150ms cubic-bezier(0.2,0.75,0.3,1), color 150ms ease'
                     }}
-                    transition={{ type: 'spring', stiffness: 450, damping: 25 }}
-                    className={`inline-block font-black transition-all duration-75 ${
-                      isCurrent
-                        ? 'drop-shadow-[0_0_25px_rgba(255,255,255,0.95)] text-white'
-                        : isPast
-                        ? 'text-white'
-                        : 'text-white/25'
+                    className={`inline-block font-black ${
+                      isCurrent ? 'drop-shadow-[0_0_14px_rgba(255,255,255,0.6)]' : ''
                     }`}
                   >
                     {w.word}
-                  </motion.span>
+                  </span>
                 );
               })
             ) : (
