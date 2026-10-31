@@ -1,3 +1,16 @@
+# Lyric Android 1.5.0 — smoother Spotify-synced lyrics
+
+**What changed:** Spotify App Remote now pushes `playerState` events directly to the UI for immediate track and pause/resume transitions. A less frequent (~1.4s) playback read corrects clock drift, refreshes album artwork, and works as a fallback if event subscriptions aren't available. Older in-flight polls cannot overwrite newer events. The lyrics clock interpolates smoothly between updates, with bounded corrections for ordinary jitter and immediate resets for seeks.
+
+**Rendering:** The lyrics component renders again only at a visible word or line boundary, not for every progress-slider update. Smooth captions use GPU-friendly CSS transitions rather than a spring animation on every word. The cover-art layer is memoized, and the default Smooth graphics quality reduces blurred shadows and the noise overlay. Settings > Lighting > Graphics quality can switch to Cinematic for full visual effects.
+
+**Playback and lyrics sources:** Spotify App Remote supplies track details and position; lyrics still come from LRCLIB or user-provided LRC. Spotify does not provide public lyrics through App Remote. Word-timed display is exact only when the underlying lyric file includes actual word timestamps; interpolated word timings are approximations. Spotify does not expose exact audio-analysis timing through this SDK.
+
+**Verification:** Automated sync drift, UI/media-session, reconnect, and event-driven playback tests run in GitHub Actions, followed by Android APK compilation and linting. Physical device playback and frame-time testing are still necessary.
+
+**Important:** The old debug APK may be signed with a different key. Upgrading while retaining app data requires a stable signing key; uninstalling erases saved preferences, Spotify auto-reconnect consent, and local lyric cache.
+
+---
 # Lyric Android 1.4.0 — persistent Spotify connection and smoother lyrics
 
 ## What's fixed and added
