@@ -49,7 +49,7 @@ References: [Android SDK setup](https://developer.spotify.com/documentation/andr
 
 **Spotify / other external players:** player metadata alone does not expose Spotify's audio waveform. Use the optional **microphone** for music audible through speakers. The microphone does **not** hear private audio in headphones and is not system-audio capture. Native analysis computes frequency-band and RMS levels in memory; it stores no audio, uploads none, and stops on leaving the foreground or turning the microphone off. Permission is requested only when the user taps the microphone control. Without an audio input, external playback gets an idle glow, not a claimed beat-synced effect.
 
-All lighting is inside Lyric. It does not overlay other apps or modify Android's system/status-bar LEDs. The app keeps the display awake while visible.
+All lighting is inside Lyric. It does not overlay other apps or modify Android's system/status-bar LEDs. The app keeps the display awake during playback, active microphone input, or focus mode; it releases that request when those stop.
 
 ### Lyrics, calibration, and manual mode
 
@@ -59,7 +59,7 @@ Tap **Calibrate this song**, then tap a line when you hear its first word. This 
 
 If automatic connectivity is unavailable, choose **Manual lyrics for another player**. Find the song, match the playhead to the external player, and start the manual lyric clock. This does not start/control Spotify and can drift if the external player buffers, pauses, or skips. Recalibrate as needed.
 
-Sleep timer stops local playback or requests a pause from the connected player, stops the microphone, and clears itself. External pauses are subject to player availability. Focus mode hides the player controls; Show player and Android Back restore them.
+The foreground-only sleep timer stops local playback or requests a pause from the connected player, stops the microphone, exits focus mode, releases the keep-screen-awake request, and clears itself. Keep Lyric open for the timer; Android may suspend timers or disconnect the SDK while the app is in the background. External pauses are subject to player availability. Focus mode hides the player controls; Show player and Android Back restore them.
 
 ## Connected edition
 

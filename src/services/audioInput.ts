@@ -3,6 +3,7 @@ import type { AudioEnergy } from './beatEnvelope';
 export const AudioInput = registerPlugin<{
   start(): Promise<void>;
   stop(): Promise<void>;
+  setKeepAwake(options: { enabled: boolean }): Promise<void>;
   getEnergy(): Promise<AudioEnergy & { active: boolean }>;
 }>('AudioInput');
 

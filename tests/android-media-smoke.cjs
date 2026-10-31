@@ -20,7 +20,7 @@ console.log('PASS: optional Android player connection, preferred Spotify selecti
 const local=await browser.newPage({viewport:{width:390,height:844}});
 await local.addInitScript(()=>{
  window.androidBridge={};window.nativeCalls=[];window.spotifyFixture={permissionGranted:true,active:true,title:'Spotify Song',artist:'Artist',album:'Album',duration:180,position:15,playing:true,canSeek:true,packageName:'com.spotify.music'};window.mic=false;
- const methods={AndroidMedia:['getCapabilities'],Spotify:['getStatus','connect','getPlayback','control','disconnect','openApp'],AudioInput:['start','stop','getEnergy']};
+ const methods={AndroidMedia:['getCapabilities'],Spotify:['getStatus','connect','getPlayback','control','disconnect','openApp'],AudioInput:['start','stop','getEnergy','setKeepAwake']};
  window.Capacitor={PluginHeaders:Object.entries(methods).map(([name,list])=>({name,methods:list.map(name=>({name,rtype:'promise'}))})),nativePromise:async(plugin,method,options)=>{
   window.nativeCalls.push({plugin,method,options});
   if(plugin==='AndroidMedia')return {musicPlayerSync:false};

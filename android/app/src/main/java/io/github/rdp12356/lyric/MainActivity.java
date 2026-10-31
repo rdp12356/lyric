@@ -1,7 +1,6 @@
 package io.github.rdp12356.lyric;
 
 import android.os.Bundle;
-import android.view.WindowManager;
 import android.view.View;
 import androidx.core.graphics.Insets;
 import androidx.core.view.ViewCompat;
@@ -17,7 +16,6 @@ public class MainActivity extends BridgeActivity {
         registerPlugin(SpotifyPlugin.class);
         registerPlugin(AudioInputPlugin.class);
         super.onCreate(savedInstanceState);
-        getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         View content = findViewById(android.R.id.content);
         WindowInsetsControllerCompat systemBars = new WindowInsetsControllerCompat(getWindow(), content);
         systemBars.setAppearanceLightNavigationBars(false);

@@ -82,6 +82,13 @@ public class AudioInputPlugin extends Plugin {
         bass = mid = treble = overall = 0;
     }
     @PluginMethod public void stop(PluginCall call) { stopInput(); call.resolve(); }
+    @PluginMethod public void setKeepAwake(PluginCall call) {
+        getActivity().runOnUiThread(() -> {
+            if (call.getBoolean("enabled", false)) getActivity().getWindow().addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+            else getActivity().getWindow().clearFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+            call.resolve();
+        });
+    }
     @PluginMethod public void getEnergy(PluginCall call) {
         JSObject result = new JSObject(); result.put("active", recorder != null);
         result.put("bass", bass); result.put("mid", mid); result.put("treble", treble); result.put("overall", overall);
