@@ -116,7 +116,19 @@ public class SpotifyPlugin extends Plugin {
             android.content.pm.ResolveInfo browser = getContext().getPackageManager().resolveActivity(probe, PackageManager.MATCH_DEFAULT_ONLY);
             if (browser != null && browser.activityInfo != null && !"android".equals(browser.activityInfo.packageName))
                 login.setPackage(browser.activityInfo.packageName);
-            getActivity().startActivity(login);
+            getActivity().runOnUiThread(() -> {
+                if (attempt != browserAttempt.get()) return;
+                try {
+                    getActivity().startActivity(login);
+                } catch (Exception error) {
+                    if (attempt == browserAttempt.get()) {
+                        browserAttempt.incrementAndGet();
+                        browserLogin = null;
+                        clearBrowserSession();
+                        call.reject("Could not launch Spotify authorization browser: " + error.getClass().getSimpleName());
+                    }
+                }
+            });
             handler.postDelayed(() -> {
                 if (attempt != browserAttempt.get() || browserLogin != call) return;
                 browserLogin = null;
@@ -135,8 +147,13 @@ public class SpotifyPlugin extends Plugin {
     @Override protected void handleOnNewIntent(Intent intent) {
         super.handleOnNewIntent(intent);
         if (intent == null || !Intent.ACTION_VIEW.equals(intent.getAction())) return;
-        Uri callback = intent.getData();
+        processSpotifyCallback(intent.getData());
+    }
+
+    private void processSpotifyCallback(Uri callback) {
         if (callback == null || !"lyric".equals(callback.getScheme()) || !"spotify-callback".equals(callback.getHost())) return;
+        // Do not reprocess the same initial intent on subsequent activity resumes.
+        getActivity().setIntent(new Intent(Intent.ACTION_MAIN));
         String expectedState = prefs().getString(SESSION_STATE, "");
         String verifier = prefs().getString(SESSION_VERIFIER, "");
         long deadline = prefs().getLong(SESSION_DEADLINE, 0L);
@@ -317,6 +334,10 @@ public class SpotifyPlugin extends Plugin {
         });
     }
     @Override protected void handleOnResume() {
+        // On a cold launch after Android kills Lyric, onNewIntent is not called.
+        Intent launchIntent = getActivity().getIntent();
+        if (launchIntent != null && Intent.ACTION_VIEW.equals(launchIntent.getAction()))
+            processSpotifyCallback(launchIntent.getData());
         if (wantsConnection && !connecting.get() && (remote == null || !remote.isConnected())) {
             String client = prefs().getString("clientId", DEFAULT_CLIENT_ID); if (!client.isEmpty()) getActivity().runOnUiThread(() -> connectRemote(client, false, null));
         }
