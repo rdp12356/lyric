@@ -23,6 +23,7 @@ export interface LyricsLookupResult {
 
 const lyricsCache = new Map<string, LyricsData>();
 const CLIENT_ID = 'Lyric/1.3.0 (+https://github.com/rdp12356/lyric)';
+let rateLimitUntil = 0;
 const normalize = (s: string) => s.normalize('NFKD').replace(/\p{M}/gu, '').toLowerCase().replace(/[^\p{L}\p{N}]/gu, '');
 const cleanTitle = (s: string) => s.trim()
   .replace(/\s*[\[(](?:feat(?:uring)?\.?|ft\.?|with)\s+[^\])]+[\])]/gi, '')
@@ -34,6 +35,7 @@ const delay = (ms: number) => new Promise<void>(resolve => setTimeout(resolve, m
 
 type ApiResult = { status: 'ok'; data: unknown } | { status: 'not-found' | 'network' | 'service-error' | 'rate-limited'; retryAfterSeconds?: number };
 async function api(path: string): Promise<ApiResult> {
+  if (Date.now() < rateLimitUntil) return { status: 'rate-limited', retryAfterSeconds: Math.ceil((rateLimitUntil - Date.now()) / 1000) };
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 9000);
   try {
@@ -43,8 +45,12 @@ async function api(path: string): Promise<ApiResult> {
     });
     if (res.status === 404) return { status: 'not-found' };
     if (res.status === 429) {
-      const retryAfter = Number(res.headers.get('Retry-After'));
-      return { status: 'rate-limited', retryAfterSeconds: Number.isFinite(retryAfter) && retryAfter > 0 ? Math.ceil(retryAfter) : undefined };
+      const raw = res.headers.get('Retry-After') || '';
+      const numeric = Number(raw);
+      const seconds = raw && Number.isFinite(numeric) ? numeric : Math.max(0, (Date.parse(raw) - Date.now()) / 1000);
+      const retryAfterSeconds = Math.max(1, Math.ceil(Number.isFinite(seconds) ? seconds : 30));
+      rateLimitUntil = Date.now() + retryAfterSeconds * 1000;
+      return { status: 'rate-limited', retryAfterSeconds };
     }
     if (!res.ok) return { status: 'service-error' };
     return { status: 'ok', data: await res.json() };
