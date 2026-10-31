@@ -37,9 +37,9 @@ await local.route('https://lrclib.net/**',r=>r.fulfill({json:{id:2,trackName:'Sp
 await local.goto('http://127.0.0.1:5173/');
 await local.getByRole('button',{name:'Sources and settings'}).click();
 assert.equal(await local.getByRole('button',{name:'Enable notification access'}).count(),0);
-await local.getByLabel('Public Client ID').fill('f'.repeat(32));await local.getByRole('button',{name:'Connect Spotify',exact:true}).click();await local.getByRole('dialog').getByText('Spotify test connection rejected',{exact:true}).waitFor();
-await local.getByLabel('Public Client ID').fill('a'.repeat(32));await local.getByRole('button',{name:'Connect Spotify',exact:true}).click();await local.getByRole('button',{name:'Cancel login'}).click();await local.getByRole('button',{name:'Connect Spotify',exact:true}).waitFor();
-await local.getByLabel('Public Client ID').fill('0123456789abcdef0123456789abcdef');await local.getByRole('button',{name:'Connect Spotify',exact:true}).click();
+await local.getByLabel('Public Client ID').fill('f'.repeat(32));await local.getByRole('button',{name:'Sign in with Spotify',exact:true}).click();await local.getByRole('dialog').getByText('Spotify test connection rejected',{exact:true}).waitFor();
+await local.getByLabel('Public Client ID').fill('a'.repeat(32));await local.getByRole('button',{name:'Sign in with Spotify',exact:true}).click();await local.getByRole('button',{name:'Cancel login'}).click();await local.getByRole('button',{name:'Sign in with Spotify',exact:true}).waitFor();
+await local.getByLabel('Public Client ID').fill('0123456789abcdef0123456789abcdef');await local.getByRole('button',{name:'Sign in with Spotify',exact:true}).click();
 await local.getByText('Spotify Song',{exact:true}).waitFor();
 assert(await local.evaluate(()=>window.nativeCalls.some(c=>c.plugin==='Spotify'&&c.method==='connectBrowser')&&!window.nativeCalls.some(c=>c.plugin==='Spotify'&&c.method==='connect')),'Connect must delegate to browser authorization, not direct SDK login');
 await local.getByRole('button',{name:'Pause',exact:true}).click();await local.getByRole('button',{name:'Play',exact:true}).waitFor();
