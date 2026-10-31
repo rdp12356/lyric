@@ -92,4 +92,4 @@ const assert = require('node:assert/strict');
   assert.deepEqual(errors, [], 'No unhandled page exceptions in Spotify event-driven UI');
   console.log('PASS: immediate native Spotify song/pause events without polling, and saved graphics setting.');
   await browser.close();
-})().catch(error => { console.error(error); process.exitCode = 1; });
+})().catch(error => { console.error(error); process.exit(1); });
