@@ -1,6 +1,9 @@
 const { chromium } = require('@playwright/test');
 const assert = require('node:assert/strict');
 
+const watchdog = setTimeout(() => { console.error('FAIL: Spotify event UI test timed out'); process.exit(1); }, 45000);
+watchdog.unref();
+
 (async () => {
   const browser = await chromium.launch({
     ...(process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH ? { executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH } : {}),
