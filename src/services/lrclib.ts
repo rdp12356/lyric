@@ -22,7 +22,7 @@ export interface LyricsLookupResult {
 }
 
 const lyricsCache = new Map<string, LyricsData>();
-const CLIENT_ID = 'Lyric/1.3.0 (+https://github.com/rdp12356/lyric)';
+const CLIENT_ID = 'Lyric/1.4.0 (+https://github.com/rdp12356/lyric)';
 let rateLimitUntil = 0;
 const normalize = (s: string) => s.normalize('NFKD').replace(/\p{M}/gu, '').toLowerCase().replace(/[^\p{L}\p{N}]/gu, '');
 const cleanTitle = (s: string) => s.trim()
@@ -92,7 +92,7 @@ function asLyrics(record: LrclibRecord, title: string, artist: string, album: st
       artistName: record.artistName || artist,
       albumName: record.albumName || album,
       synced: true,
-      hasWordSync: false, // The LRC parser estimates word times unless enhanced timestamps exist.
+      hasWordSync: /<\d{2,}:\d{2}(?:\.\d{1,3})?>/.test(record.syncedLyrics),
       lines,
       plainText: record.plainLyrics || undefined,
       source: 'LRCLIB'
@@ -128,20 +128,18 @@ export async function lookupLyricsFromLRCLIB(
   const stored = cachedLyrics(key) || lyricsCache.get(key);
   if (stored) return { lyrics: stored };
 
-  const exactParams = new URLSearchParams({ track_name: title, artist_name: artist });
-  if (albumName) exactParams.set('album_name', albumName);
-  if (duration > 0 && duration <= 3600) exactParams.set('duration', String(Math.round(duration)));
-
-  const looseParams = new URLSearchParams({ track_name: title, artist_name: artist });
   const searchParams = new URLSearchParams({ track_name: title, artist_name: artist });
   const broadParams = new URLSearchParams({ q: title + ' ' + artist });
-
-  const paths = [
-    '/api/get?' + exactParams,
-    '/api/get?' + looseParams,
-    '/api/search?' + searchParams,
-    '/api/search?' + broadParams
-  ].filter((path, idx, all) => all.indexOf(path) === idx);
+  // /api/get requires album and duration; omitting them produces HTTP 400.
+  const paths: string[] = [];
+  if (albumName.trim() && duration > 0 && duration <= 3600) {
+    const exactParams = new URLSearchParams({
+      track_name: title, artist_name: artist, album_name: albumName,
+      duration: String(Math.round(duration))
+    });
+    paths.push('/api/get?' + exactParams);
+  }
+  paths.push('/api/search?' + searchParams, '/api/search?' + broadParams);
 
   const candidates = new Map<number, LrclibRecord>();
   let networkFailed = false, serviceFailed = false, instrumentalFound = false;

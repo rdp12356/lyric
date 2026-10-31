@@ -19,14 +19,17 @@ await page.evaluate(()=>{window.mediaFixture.active=false});await page.getByRole
 console.log('PASS: optional Android player connection, preferred Spotify selection, native pause/seek, and session disappearance.');
 const local=await browser.newPage({viewport:{width:390,height:844}});
 await local.addInitScript(()=>{
- window.androidBridge={};window.nativeCalls=[];window.spotifyFixture={permissionGranted:true,active:true,title:'Spotify Song',artist:'Artist',album:'Album',duration:180,position:15,playing:true,canSeek:true,packageName:'com.spotify.music'};window.mic=false;
- const methods={AndroidMedia:['getCapabilities'],Spotify:['getStatus','connect','connectBrowser','getPlayback','control','disconnect','openApp'],AudioInput:['start','stop','getEnergy','setKeepAwake']};
+ window.androidBridge={};window.nativeCalls=[];window.spotifyFixture={permissionGranted:true,active:true,title:'Spotify Song',artist:'Artist',album:'Album',duration:180,position:15,playing:true,canSeek:true,packageName:'com.spotify.music'};window.mic=false;window.spotifyConnectedMock=false;window.spotifyAutoReconnectMock=false;
+ const methods={AndroidMedia:['getCapabilities'],Spotify:['getStatus','connect','connectBrowser','reconnect','setAutoReconnect','getPlayback','control','disconnect','openApp'],AudioInput:['start','stop','getEnergy','setKeepAwake']};
  window.Capacitor={PluginHeaders:Object.entries(methods).map(([name,list])=>({name,methods:list.map(name=>({name,rtype:'promise'}))})),nativePromise:async(plugin,method,options)=>{
   window.nativeCalls.push({plugin,method,options});
   if(plugin==='AndroidMedia')return {musicPlayerSync:false};
   if(plugin==='Spotify'){
-   if(method==='getStatus')return {connected:false,clientId:'',packageName:'io.github.rdp12356.lyric',fingerprint:'AA:BB:CC'};
-   if(method==='connect'||method==='connectBrowser'){if(options.clientId==='f'.repeat(32))throw new Error('Spotify test connection rejected');if(options.clientId==='a'.repeat(32))return new Promise(()=>{});return {connected:true,clientId:options.clientId};}
+   if(method==='getStatus')return {connected:window.spotifyConnectedMock,autoReconnect:window.spotifyAutoReconnectMock,clientId:'',packageName:'io.github.rdp12356.lyric',fingerprint:'AA:BB:CC'};
+   if(method==='connect'||method==='connectBrowser'){if(options.clientId==='f'.repeat(32))throw new Error('Spotify test connection rejected');if(options.clientId==='a'.repeat(32))return new Promise(()=>{});window.spotifyConnectedMock=true;window.spotifyAutoReconnectMock=true;return {connected:true,autoReconnect:true,clientId:options.clientId};}
+   if(method==='reconnect'){window.spotifyConnectedMock=true;return {connected:true,autoReconnect:window.spotifyAutoReconnectMock};}
+   if(method==='setAutoReconnect'){window.spotifyAutoReconnectMock=options.enabled;return {connected:window.spotifyConnectedMock,autoReconnect:window.spotifyAutoReconnectMock};}
+   if(method==='disconnect'){window.spotifyConnectedMock=false;window.spotifyAutoReconnectMock=false;return;}
    if(method==='getPlayback')return window.spotifyFixture;
    if(method==='control'){if(options.action==='play-pause')window.spotifyFixture.playing=!window.spotifyFixture.playing;if(options.action==='seek')window.spotifyFixture.position=options.position;}
   }

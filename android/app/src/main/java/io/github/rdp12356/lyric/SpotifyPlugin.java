@@ -25,6 +25,10 @@ import java.util.concurrent.atomic.AtomicBoolean;
 public class SpotifyPlugin extends Plugin {
     private static final String DEFAULT_CLIENT_ID = "62946f0e6551422aa8d3a5627245ab54";
     private static final String REDIRECT = "lyric://spotify-callback";
+    private static final String PREF_AUTO_RECONNECT = "autoReconnect";
+    private static final long RECONNECT_COOLDOWN_MS = 6000L;
+    private long lastReconnectAttemptAt = 0L;
+
     private SpotifyAppRemote remote;
     private final AtomicBoolean connecting = new AtomicBoolean(false);
     private boolean wantsConnection;
@@ -47,9 +51,33 @@ public class SpotifyPlugin extends Plugin {
     }
     private JSObject status() {
         JSObject result = new JSObject(); result.put("phase", browserLogin != null ? "browser" : exchangingAuthorization ? "return" : connecting.get() ? "playback" : "idle"); result.put("connected", remote != null && remote.isConnected()); result.put("clientId", prefs().getString("clientId", DEFAULT_CLIENT_ID));
-        result.put("spotifyInstalled", SpotifyAppRemote.isSpotifyInstalled(getContext())); result.put("packageName", getContext().getPackageName()); result.put("fingerprint", fingerprint()); result.put("redirectUri", REDIRECT); return result;
+        result.put("spotifyInstalled", SpotifyAppRemote.isSpotifyInstalled(getContext())); result.put("packageName", getContext().getPackageName()); result.put("fingerprint", fingerprint()); result.put("redirectUri", REDIRECT);
+        result.put("autoReconnect", prefs().getBoolean(PREF_AUTO_RECONNECT, false));
+        return result;
     }
     @PluginMethod public void getStatus(PluginCall call) { call.resolve(status()); }
+    @PluginMethod public void reconnect(PluginCall call) {
+        if (!prefs().getBoolean(PREF_AUTO_RECONNECT, false)) {
+            call.reject("No saved Spotify connection. Sign in with Spotify first."); return;
+        }
+        if (!SpotifyAppRemote.isSpotifyInstalled(getContext())) {
+            call.reject("Install and sign in to the official Spotify app first."); return;
+        }
+        wantsConnection = true;
+        if (remote != null && remote.isConnected()) { call.resolve(status()); return; }
+        if (connecting.get()) { call.resolve(status()); return; }
+        lastReconnectAttemptAt = android.os.SystemClock.elapsedRealtime();
+        getActivity().runOnUiThread(() -> connectRemote(prefs().getString("clientId", DEFAULT_CLIENT_ID), false, call));
+    }
+    @PluginMethod public void setAutoReconnect(PluginCall call) {
+        Boolean enabled = call.getBoolean("enabled");
+        if (enabled == null) { call.reject("Specify whether automatic reconnection is enabled."); return; }
+        if (enabled && !prefs().getBoolean(PREF_AUTO_RECONNECT, false) && (remote == null || !remote.isConnected())) {
+            call.reject("Connect Spotify successfully before enabling auto reconnect."); return;
+        }
+        prefs().edit().putBoolean(PREF_AUTO_RECONNECT, enabled).apply();
+        call.resolve(status());
+    }
     @PluginMethod public void connect(PluginCall call) {
         String clientId = call.getString("clientId", "").trim();
         if (!clientId.matches("[a-fA-F0-9]{32}")) { call.reject("Enter the 32-character public Spotify Client ID"); return; }
@@ -65,6 +93,7 @@ public class SpotifyPlugin extends Plugin {
     private static final String SESSION_DEADLINE = "oauthDeadline";
     private volatile PluginCall browserLogin;
     private volatile boolean exchangingAuthorization;
+    private volatile boolean rememberAfterAuthorization;
     private final java.util.concurrent.atomic.AtomicInteger browserAttempt = new java.util.concurrent.atomic.AtomicInteger();
 
     private String encode(String value) throws Exception { return java.net.URLEncoder.encode(value, "UTF-8"); }
@@ -94,6 +123,7 @@ public class SpotifyPlugin extends Plugin {
             return;
         }
         wantsConnection = false;
+        rememberAfterAuthorization = false;
         browserLogin = call;
         prefs().edit().putString("clientId", client).apply();
         int attempt = browserAttempt.incrementAndGet();
@@ -194,6 +224,7 @@ public class SpotifyPlugin extends Plugin {
                 handler.post(() -> {
                     if (attempt != browserAttempt.get()) return;
                     exchangingAuthorization = false;
+                    rememberAfterAuthorization = true;
                     wantsConnection = true;
                     connectRemote(client, false, call);
                 });
@@ -242,6 +273,8 @@ public class SpotifyPlugin extends Plugin {
                 @Override public void onConnected(SpotifyAppRemote value) {
                     if (attempt != generation || !wantsConnection) { SpotifyAppRemote.disconnect(value); return; }
                     handler.removeCallbacks(timeout); pendingLogin = null; remote = value; connecting.set(false);
+                    if (call != null || rememberAfterAuthorization) prefs().edit().putBoolean(PREF_AUTO_RECONNECT, true).apply();
+                    rememberAfterAuthorization = false;
                     subscription = remote.getPlayerApi().subscribeToPlayerState();
                     subscription.setEventCallback(state -> latest = state);
                     subscription.setErrorCallback(error -> latest = null);
@@ -249,11 +282,11 @@ public class SpotifyPlugin extends Plugin {
                 }
                 @Override public void onFailure(Throwable error) {
                     if (attempt != generation) return;
-                    handler.removeCallbacks(timeout); pendingLogin = null; connecting.set(false); remote = null;
+                    handler.removeCallbacks(timeout); pendingLogin = null; connecting.set(false); remote = null; rememberAfterAuthorization = false;
                     if (call != null) call.reject("Spotify connection failed (" + error.getClass().getSimpleName() + "). Check that Spotify is installed, your Client ID is registered for Android, and the package name and SHA-1 match this APK.");
                 }
             });
-        } catch (Exception error) { handler.removeCallbacks(timeout); connecting.set(false); if (call != null) call.reject("Could not open Spotify. Install the official Spotify app first."); }
+        } catch (Exception error) { handler.removeCallbacks(timeout); connecting.set(false); rememberAfterAuthorization = false; if (call != null) call.reject("Could not open Spotify. Install the official Spotify app first."); }
     }
     private void dropConnection() {
         if (subscription != null) subscription.cancel(); subscription = null;
@@ -261,7 +294,9 @@ public class SpotifyPlugin extends Plugin {
     }
     @PluginMethod public void disconnect(PluginCall call) {
         cancelBrowser();
-        wantsConnection = false; generation++; connecting.set(false);
+        wantsConnection = false; rememberAfterAuthorization = false;
+        prefs().edit().putBoolean(PREF_AUTO_RECONNECT, false).apply();
+        generation++; connecting.set(false);
         PluginCall pending = pendingLogin; pendingLogin = null;
         if (pending != null) pending.reject("Spotify connection cancelled");
         getActivity().runOnUiThread(() -> { dropConnection(); call.resolve(); });
@@ -338,10 +373,21 @@ public class SpotifyPlugin extends Plugin {
         Intent launchIntent = getActivity().getIntent();
         if (launchIntent != null && Intent.ACTION_VIEW.equals(launchIntent.getAction()))
             processSpotifyCallback(launchIntent.getData());
-        if (wantsConnection && !connecting.get() && (remote == null || !remote.isConnected())) {
-            String client = prefs().getString("clientId", DEFAULT_CLIENT_ID); if (!client.isEmpty()) getActivity().runOnUiThread(() -> connectRemote(client, false, null));
+        if (prefs().getBoolean(PREF_AUTO_RECONNECT, false) && browserLogin == null && !exchangingAuthorization) {
+            wantsConnection = true;
+            long now = android.os.SystemClock.elapsedRealtime();
+            if (!connecting.get() && (remote == null || !remote.isConnected())
+                && now - lastReconnectAttemptAt >= RECONNECT_COOLDOWN_MS
+                && SpotifyAppRemote.isSpotifyInstalled(getContext())) {
+                lastReconnectAttemptAt = now;
+                String client = prefs().getString("clientId", DEFAULT_CLIENT_ID);
+                if (!client.isEmpty()) getActivity().runOnUiThread(() -> connectRemote(client, false, null));
+            }
         }
     }
-    @Override protected void handleOnStop() { if (remote != null && remote.isConnected()) dropConnection(); }
+    @Override protected void handleOnStop() {
+        // Release the App Remote while backgrounded; the remembered opt-in survives app recreation.
+        if (remote != null && remote.isConnected()) dropConnection();
+    }
     @Override protected void handleOnDestroy() { browserAttempt.incrementAndGet(); browserLogin = null; exchangingAuthorization = false; wantsConnection = false; generation++; connecting.set(false); dropConnection(); handler.removeCallbacksAndMessages(null); }
 }

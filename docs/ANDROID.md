@@ -1,3 +1,20 @@
+# Lyric Android 1.4.0 — persistent Spotify connection and smoother lyrics
+
+## What's fixed and added
+
+- **Remember Spotify:** After a successful connection, Lyric remembers an opt-in preference in Android app-private storage and restores Spotify mode when you reopen it. The official Spotify App Remote SDK reconnects silently on activity resume. Lyric never saves Spotify credentials or OAuth access tokens.
+- **Reconnect control:** Sources & settings shows the current SDK connection state, a manual **Reconnect Spotify** button if the remote is disconnected, and a **Reconnect Spotify automatically** toggle. Explicit **Disconnect** clears the preference and stops future automatic reconnect attempts.
+- **Better lyrics lookup:** LRCLIB matching searches alternate releases, handles live/remastered titles and featuring artists, respects rate limits, and explains when lyrics are unavailable versus when the API or network failed. The retry button attempts the lookup again without reopening Spotify.
+- **Smoother UI:** Spotify metadata polling is less frequent (approximately 800ms), while the playback clock continues to advance between updates. UI time/lighting updates are throttled to avoid unnecessary full-screen React renders.
+
+## Important limitations
+
+- **Auto reconnect is not permanent Spotify authentication.** If the official Spotify app is logged out, authorizations are revoked, or the SDK refuses to bind, open Spotify and use Reconnect or Sign in again.
+- **APK updates must use the same signing key** to preserve app data. This workflow's `ANDROID_DEBUG_KEYSTORE_BASE64` secret optionally supplies a stable private debug keystore. If different debug signing requires uninstall, Android removes all saved Lyric settings including the reconnect preference. Never commit signing keys or tokens.
+- **Lyrics are sourced from LRCLIB, not Spotify's private lyrics UI.** Availability and timing depend on published tracks; not every song has timestamped lyrics. Plain lyrics use estimated timings and should not be mistaken for true word-level synchronization.
+- Reopening after backgrounding and force-closing, OAuth expiry, reconnect failure, APK upgrade, and device-specific rendering require physical Android testing.
+
+---
 # Spotify Android callback repair
 
 **Symptom:** After authorizing Spotify in Chrome, the address `http://127.0.0.1:43821/callback` gives ERR_CONNECTION_REFUSED.
@@ -56,7 +73,7 @@ This version uses the **official Spotify Android App Remote SDK 0.8.0**, not Web
 
 Spotify's SDK documentation describes reading PlayerState without Web API calls and restricts arbitrary-track URI playback to accounts with on-demand capability. Lyric does not invoke arbitrary-track playback. Whether a particular Free account/developer registration can connect, and which seek/skip operations it allows, must still be tested on the actual device. The app respects Spotify's reported restrictions; it does not bypass subscription requirements or ads. Web API development-mode Premium requirements and Web Playback SDK Premium requirements remain unchanged.
 
-The SDK disconnects while Lyric is stopped and reconnects when returning after a successful connection. An app restart requires choosing Connect/Follow Spotify again. **Disconnect** closes the local SDK connection; Spotify account permissions can be revoked separately in Spotify account settings.
+The SDK disconnects while Lyric is stopped and attempts silent reconnection when returning after a successful connection, if auto-reconnect is enabled. Reopening Lyric no longer requires choosing Connect/Follow Spotify again when the SDK authorization remains valid. **Disconnect** closes the local SDK connection; Spotify account permissions can be revoked separately in Spotify account settings.
 
 Debug APK signing fingerprints can change between CI runs unless the repository owner configures `ANDROID_DEBUG_KEYSTORE_BASE64` as an Actions secret containing a standard Android development keystore. The current GitHub connection cannot write repository secrets (HTTP 403), so each build exports its public fingerprint rather than claiming stable signing. Never commit a production signing key or Client Secret.
 

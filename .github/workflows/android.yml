@@ -2,7 +2,7 @@ name: Android APK
 
 on:
   push:
-    branches: [main, android-port, 'fix/spotify-android-deep-link', 'fix/spotify-lyrics-lookup']
+    branches: [main, android-port, 'fix/spotify-android-deep-link', 'fix/spotify-lyrics-lookup', 'fix/spotify-persistent-session-performance']
   pull_request:
     branches: [main, android-port, 'fix/spotify-lyrics-lookup']
   workflow_dispatch:
