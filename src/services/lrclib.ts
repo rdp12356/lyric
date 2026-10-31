@@ -22,7 +22,7 @@ export interface LyricsLookupResult {
 }
 
 const lyricsCache = new Map<string, LyricsData>();
-const CLIENT_ID = 'Lyric/1.3.0 (+https://github.com/rdp12356/lyric)';
+const CLIENT_ID = 'Lyric/1.4.0 (+https://github.com/rdp12356/lyric)';
 let rateLimitUntil = 0;
 const normalize = (s: string) => s.normalize('NFKD').replace(/\p{M}/gu, '').toLowerCase().replace(/[^\p{L}\p{N}]/gu, '');
 const cleanTitle = (s: string) => s.trim()
