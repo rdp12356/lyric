@@ -1,11 +1,22 @@
-# Redirect authorization update — 1.3.0
+# Spotify Android callback repair
 
-**Sign in with Spotify** now opens the system browser at Spotify Accounts. It requests only `app-remote-control` using Authorization Code + PKCE and random OAuth state. The redirect remains `http://127.0.0.1:43821/callback`, already registered for the supplied public Client ID. A temporary server binds only to the phone's loopback interface and expires after 150 seconds. The callback validates state and exchanges the code with Spotify over HTTPS without a Client Secret; returned tokens are not saved or exposed to JavaScript.
+**Symptom:** After authorizing Spotify in Chrome, the address `http://127.0.0.1:43821/callback` gives ERR_CONNECTION_REFUSED.
 
-After authorization, the browser attempts to open `lyric://spotify-return`. If automatic handoff is blocked by the browser, tap **Return to Lyric**. On resuming Lyric, the official App Remote SDK connects with its authorization view disabled. Only a successful SDK connection marks the app Connected. Browser authorization by itself is not playback access. The installed official Spotify app, matching Android package/SHA-1 registration, account eligibility, and SDK service connectivity are still required. This does not use the Web API to read playback and does not bypass any Spotify restriction.
+The browser OAuth flow now uses the registered Android deep link **`lyric://spotify-callback`** rather than a short-lived loopback HTTP listener. Android routes Spotify's callback directly to Lyric, even if the original activity is recreated. Lyric validates the one-time OAuth state, exchanges the code using PKCE over HTTPS, and connects to the official Spotify App Remote SDK. No client secret is used, and access tokens are neither saved nor exposed to JavaScript.
 
-Cancel closes the callback listener and rejects the pending login. Errors remain visible in the settings sheet. Actual provider authorization and playback on the user's account require physical-device testing; the browser-to-SDK combination is implemented but not verified against the user's phone. If Spotify declines the scope or the SDK still cannot bind, the app reports failure rather than claiming a connection.
+## Important: Spotify Dashboard must be updated
 
+1. Open https://developer.spotify.com/dashboard and select the application matching Lyric's displayed public Client ID.
+2. Add the **exact redirect URI `lyric://spotify-callback`** (all lowercase; no trailing slash) and save. The app cannot finish authorization without this change. The old loopback callback is no longer used by this build.
+3. Register Android package `io.github.rdp12356.lyric` and the SHA-1 fingerprint of the APK you install, found in `spotify-android-setup.txt`.
+4. Install the new APK. Open Spotify, sign in, and play a track. In Lyric, tap **Sign in with Spotify**, authorize in Chrome, and choose **Open Lyric** when prompted.
+5. Only successful Spotify App Remote connection marks Lyric **Connected**. Browser authorization alone does not guarantee playback availability.
+
+The temporary OAuth state and PKCE verifier are kept in private app preferences for at most three minutes for activity recreation; they are cleared on use or cancellation. If Android kills the original JavaScript context, try a fresh connection from the app. Never share full callback URLs containing an authorization code.
+
+**Not yet device-verified:** this patch still requires Android CI compilation, Dashboard configuration, and a physical-phone test to confirm Spotify App Remote binding.
+
+---
 # Lyric for Android 1.1.0
 
 The default **Local edition** plays your files and catalog previews, caches lyrics for offline use, imports LRC files, and adds optional official Spotify App Remote connectivity. It has **no notification-listener service**. The separate **Connected edition** also supports generic Android media sessions through optional notification access, which may be blocked for sideloaded apps. Keep Play Protect enabled.
@@ -38,7 +49,7 @@ This version uses the **official Spotify Android App Remote SDK 0.8.0**, not Web
 
 1. Install the official Spotify app and sign in.
 2. Create an app in the [Spotify Developer Dashboard](https://developer.spotify.com/dashboard). Select **Android**. Web API and Web Playback SDK are not required for this route.
-3. Add the exact redirect URI `http://127.0.0.1:43821/callback`.
+3. Add the exact redirect URI `lyric://spotify-callback` and save it in the Spotify Developer Dashboard.
 4. In the developer app's Android configuration, register package `io.github.rdp12356.lyric` and the **SHA-1 signing fingerprint for the APK you install**. Find both in `spotify-android-setup.txt` or Lyric's Sources & settings screen.
 5. Your public Client ID `62946f0e6551422aa8d3a5627245ab54` is prefilled in Lyric's **Sources & settings → Spotify app**. Tap **Connect Spotify** and authorize in Spotify. You can replace the Client ID to use a different registration; a client secret is not needed.
 6. Start your music in Spotify and return to Lyric. The native SDK reports the playing song, position, speed, artwork, and control restrictions.
