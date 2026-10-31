@@ -7,12 +7,14 @@ interface TrackSearchModalProps {
   isOpen: boolean;
   onClose: () => void;
   onSelectTrack: (track: Track) => void;
+  previewsOnly?: boolean;
 }
 
 export const TrackSearchModal: React.FC<TrackSearchModalProps> = ({
   isOpen,
   onClose,
-  onSelectTrack
+  onSelectTrack,
+  previewsOnly = false
 }) => {
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<Track[]>([]);
@@ -50,9 +52,10 @@ export const TrackSearchModal: React.FC<TrackSearchModalProps> = ({
         <div className="flex items-center justify-between px-6 py-4 border-b border-white/10 bg-white/5">
           <div className="flex items-center gap-2">
             <Sparkles className="w-4 h-4 text-cyan-400" />
-            <h2 className="text-base font-bold text-white">Search Music & Synced Lyrics</h2>
+            <h2 className="text-base font-bold text-white">{previewsOnly ? 'Search song previews' : 'Search Music & Synced Lyrics'}</h2>
           </div>
           <button
+            aria-label="Close search"
             onClick={onClose}
             className="p-1.5 rounded-xl text-white/60 hover:text-white hover:bg-white/10 transition"
           >
@@ -118,7 +121,7 @@ export const TrackSearchModal: React.FC<TrackSearchModalProps> = ({
                 </div>
 
                 <button className="px-3 py-1.5 rounded-xl text-xs font-medium glass-button text-white/80 group-hover:text-white shrink-0">
-                  Play & Sync
+                  {previewsOnly ? 'Play preview' : 'Play & Sync'}
                 </button>
               </div>
             ))
@@ -128,7 +131,7 @@ export const TrackSearchModal: React.FC<TrackSearchModalProps> = ({
             </div>
           ) : (
             <div className="text-center py-12 text-white/40 text-xs">
-              Type a song or artist name above to find any track with synced lyrics!
+              {previewsOnly ? 'Search short audio previews. For full-song lyric sync, open a local file or connect your music player.' : 'Type a song or artist name above to find any track with synced lyrics!'}
             </div>
           )}
         </div>

@@ -77,6 +77,11 @@ class AudioVisualizerEngine {
   private isConnected = false;
 
   public init(audioEl: HTMLAudioElement) {
+    if (this.audioElement !== audioEl) {
+      this.sourceNode?.disconnect();
+      this.sourceNode = null;
+      this.isConnected = false;
+    }
     this.audioElement = audioEl;
     if (!this.audioCtx) {
       const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;

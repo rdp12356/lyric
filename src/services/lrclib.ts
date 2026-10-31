@@ -33,6 +33,8 @@ export async function fetchLyricsFromLRCLIB(
     return lyricsCache.get(cacheKey)!;
   }
 
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 12000);
   try {
     // 1. Try exact get endpoint first
     const params = new URLSearchParams({
@@ -45,7 +47,7 @@ export async function fetchLyricsFromLRCLIB(
     let record: LrclibRecord | null = null;
 
     try {
-      const res = await fetch(`https://lrclib.net/api/get?${params.toString()}`);
+      const res = await fetch(`https://lrclib.net/api/get?${params.toString()}`, { signal: controller.signal });
       if (res.ok) {
         record = await res.json();
       }
@@ -56,7 +58,7 @@ export async function fetchLyricsFromLRCLIB(
     // 2. Fallback to search endpoint if exact match wasn't found
     if (!record || (!record.syncedLyrics && !record.plainLyrics)) {
       const searchRes = await fetch(
-        `https://lrclib.net/api/search?track_name=${encodeURIComponent(cleanTrack)}&artist_name=${encodeURIComponent(cleanArtist)}`
+        `https://lrclib.net/api/search?track_name=${encodeURIComponent(cleanTrack)}&artist_name=${encodeURIComponent(cleanArtist)}`, { signal: controller.signal }
       );
       if (searchRes.ok) {
         const searchResults: LrclibRecord[] = await searchRes.json();
@@ -70,7 +72,7 @@ export async function fetchLyricsFromLRCLIB(
     // 3. Fallback to broad query search
     if (!record || (!record.syncedLyrics && !record.plainLyrics)) {
       const broadRes = await fetch(
-        `https://lrclib.net/api/search?q=${encodeURIComponent(`${cleanTrack} ${cleanArtist}`)}`
+        `https://lrclib.net/api/search?q=${encodeURIComponent(`${cleanTrack} ${cleanArtist}`)}`, { signal: controller.signal }
       );
       if (broadRes.ok) {
         const broadResults: LrclibRecord[] = await broadRes.json();
@@ -120,6 +122,8 @@ export async function fetchLyricsFromLRCLIB(
   } catch (err) {
     console.error('Error fetching lyrics from LRCLIB:', err);
     return null;
+  } finally {
+    clearTimeout(timeout);
   }
 }
 

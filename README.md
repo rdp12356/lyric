@@ -1,5 +1,7 @@
 # Lyric ✦ Open-Source Ambient Rim Lighting & Kinetic Synced Lyrics
 
+**Android port:** See [Android installation, permissions, and build instructions](docs/ANDROID.md). The Android app supports local audio, LRC import, and optional native media-session sync.
+
 <div align="center">
 
 [![Live Web App](https://img.shields.io/badge/Live_Web_App-GitHub_Pages-brightgreen?logo=githubpages)](https://rithvikvatti.github.io/lyric/)
