@@ -26,6 +26,8 @@ jobs:
         run: npm ci --ignore-scripts
       - name: Typecheck and production build
         run: npm run build
+      - name: High-confidence tracked-source secret scan
+        run: node scripts/scan-secrets.cjs
       - name: Library / queue / backup tests
         run: node tests/library-model.cjs
       - name: Existing Spotify and lyrics regressions
