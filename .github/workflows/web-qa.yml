@@ -35,6 +35,7 @@ jobs:
       - name: Lyrics cache, clock and desktop security regressions
         run: |
           node tests/lrclib-refresh.cjs
+          node tests/lrclib-version-matching.cjs
           node tests/sync-audio.cjs
           node tests/desktop-bridge-security.cjs
       - name: Install Playwright Chromium
