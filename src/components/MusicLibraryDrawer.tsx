@@ -139,7 +139,7 @@ export function MusicLibraryDrawer({ open, onClose, playing, onPlayTrack, sugges
                 {state.repeat === 'one' ? <Repeat1 size={14} /> : <Repeat size={14} />} {repeatLabel[state.repeat]}
               </button>
               <button className={ACTION} disabled={!state.queue.length}
-                onClick={() => musicLibrary.clearQueue()}>Clear queue</button>
+                onClick={() => { if (window.confirm('Clear all queued songs? Your playlists and favorites will stay saved.')) musicLibrary.clearQueue(); }}>Clear queue</button>
             </div>
           </section>
           {!state.queue.length && <p className="text-xs text-white/50">Your queue is empty. Add a demo preview or search for music.</p>}
@@ -195,7 +195,7 @@ export function MusicLibraryDrawer({ open, onClose, playing, onPlayTrack, sugges
             <div className="flex items-center justify-between gap-2">
               <h4 className="min-w-0 truncate text-sm font-semibold">{selected.name}</h4>
               <button className={ACTION} aria-label={'Delete playlist ' + selected.name}
-                onClick={() => { musicLibrary.deletePlaylist(selected.id); setSelectedList(''); }}>
+                onClick={() => { if (window.confirm('Delete playlist "' + selected.name + '"? Songs and favorites will remain in your library.')) { musicLibrary.deletePlaylist(selected.id); setSelectedList(''); } }}>
                 <Trash2 size={14} />
               </button>
             </div>
@@ -232,7 +232,7 @@ export function MusicLibraryDrawer({ open, onClose, playing, onPlayTrack, sugges
       </div>
       <footer className="flex shrink-0 items-center justify-between border-t border-white/10 px-4 py-3 text-[11px] text-white/45">
         <span className="flex items-center gap-1"><Check size={13} className="text-emerald-300"/> Saved locally</span>
-        <span>No audio streaming or subscriptions required</span>
+        <span>Preview availability depends on the source</span>
       </footer>
     </aside>
   </div>;
