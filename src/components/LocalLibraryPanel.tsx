@@ -17,7 +17,7 @@ const headings: { id: Section; label: string }[] = [
   { id: 'playlists', label: 'Playlists' }, { id: 'history', label: 'History' },
   { id: 'backup', label: 'Backup' }
 ];
-export function LocalLibraryPanel({ open, onClose, onPlay, nowPlayingId }: Props) {
+function LocalLibraryPanelComponent({ open, onClose, onPlay, nowPlayingId }: Props) {
   const library = useLibrary();
   const [section, setSection] = useState<Section>('queue');
   const [newPlaylist, setNewPlaylist] = useState('');
@@ -181,3 +181,6 @@ export function LocalLibraryPanel({ open, onClose, onPlay, nowPlayingId }: Props
     </section>
   </div>;
 }
+
+// Playback progress belongs to its own clock; avoid rebuilding library rows on every tick.
+export const LocalLibraryPanel = React.memo(LocalLibraryPanelComponent);
