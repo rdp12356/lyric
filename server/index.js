@@ -6,8 +6,31 @@ import os from 'os';
 const app = express();
 const PORT = process.env.PORT || 4892;
 
-app.use(cors());
-app.use(express.json());
+// Browser requests may originate from our own web app, not arbitrary pages
+// issuing commands to the user's localhost playback service.
+const allowedOrigins = new Set([
+  'http://localhost:5173',
+  'http://127.0.0.1:5173',
+  'http://localhost:4892',
+  'http://127.0.0.1:4892',
+  'https://rdp12356.github.io',
+  ...String(process.env.LYRIC_ALLOWED_ORIGINS || '').split(',').map(x => x.trim()).filter(Boolean)
+]);
+app.use((req, res, next) => {
+  const origin = req.headers.origin;
+  if (origin && !allowedOrigins.has(origin)) {
+    return res.status(403).json({ error: 'Origin is not allowed for local companion control.' });
+  }
+  next();
+});
+app.use(cors({
+  origin(origin, callback) {
+    callback(null, !origin || allowedOrigins.has(origin));
+  },
+  methods: ['GET', 'POST', 'OPTIONS'],
+  allowedHeaders: ['Content-Type']
+}));
+app.use(express.json({ limit: '16kb' }));
 
 const isMac = os.platform() === 'darwin';
 const isWin = os.platform() === 'win32';
@@ -295,7 +318,8 @@ app.get('/api/now-playing', async (req, res) => {
 
 // Controls
 app.post('/api/player/play-pause', async (req, res) => {
-  const { targetApp } = req.body;
+  const { targetApp } = req.body || {};
+  if (targetApp !== 'Spotify' && targetApp !== 'Music') return res.status(400).json({ error: 'Invalid player.' });
   if (isMac) {
     const appName = targetApp === 'Spotify' ? 'Spotify' : 'Music';
     try {
@@ -316,7 +340,8 @@ app.post('/api/player/play-pause', async (req, res) => {
 });
 
 app.post('/api/player/next', async (req, res) => {
-  const { targetApp } = req.body;
+  const { targetApp } = req.body || {};
+  if (targetApp !== 'Spotify' && targetApp !== 'Music') return res.status(400).json({ error: 'Invalid player.' });
   if (isMac) {
     const appName = targetApp === 'Spotify' ? 'Spotify' : 'Music';
     try {
@@ -337,7 +362,8 @@ app.post('/api/player/next', async (req, res) => {
 });
 
 app.post('/api/player/previous', async (req, res) => {
-  const { targetApp } = req.body;
+  const { targetApp } = req.body || {};
+  if (targetApp !== 'Spotify' && targetApp !== 'Music') return res.status(400).json({ error: 'Invalid player.' });
   if (isMac) {
     const appName = targetApp === 'Spotify' ? 'Spotify' : 'Music';
     try {
@@ -358,11 +384,16 @@ app.post('/api/player/previous', async (req, res) => {
 });
 
 app.post('/api/player/seek', async (req, res) => {
-  const { targetApp, position } = req.body;
+  const { targetApp, position } = req.body || {};
+  const positionSeconds = Number(position);
+  if ((targetApp !== 'Spotify' && targetApp !== 'Music')
+      || !Number.isFinite(positionSeconds) || positionSeconds < 0 || positionSeconds > 86400) {
+    return res.status(400).json({ error: 'Invalid player or playback position.' });
+  }
   if (isMac) {
-    const appName = targetApp === 'Spotify' ? 'Spotify' : 'Music';
+    const appName = targetApp;
     try {
-      await runAppleScript(`tell application "${appName}" to set player position to ${position}`);
+      await runAppleScript(`tell application "${appName}" to set player position to ${positionSeconds}`);
       return res.json({ success: true });
     } catch (err) {
       return res.status(500).json({ error: err.message });
@@ -381,6 +412,6 @@ app.get('/api/health', (req, res) => {
   });
 });
 
-app.listen(PORT, () => {
-  console.log(`✨ Lyric Companion Server running on http://localhost:${PORT}`);
+app.listen(PORT, '127.0.0.1', () => {
+  console.log(`✨ Lyric Companion Server running on http://127.0.0.1:${PORT}`);
 });
