@@ -48,4 +48,5 @@ jobs:
             sleep 1
           done
           timeout 90s node tests/library-ui.cjs
+          timeout 90s node tests/spotify-catalog-ui.cjs
           timeout 90s node tests/web-spotify-ui.cjs
