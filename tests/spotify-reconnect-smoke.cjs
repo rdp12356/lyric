@@ -14,12 +14,13 @@ const assert = require('node:assert/strict');
     window.spotifyCalls = [];
     window.spotifyConnectedMock = false;
     const methods = {
-      Spotify: ['getStatus','connect','connectBrowser','reconnect','setAutoReconnect','getPlayback','control','disconnect','openApp'],
+      Spotify: ['getStatus','connect','connectBrowser','reconnect','setAutoReconnect','getPlayback','control','disconnect','openApp','addListener','removeListener'],
       AndroidMedia: ['getCapabilities'],
       AudioInput: ['start','stop','getEnergy','setKeepAwake']
     };
     window.Capacitor = {
-      PluginHeaders: Object.entries(methods).map(([name, entries]) => ({ name, methods: entries.map(method => ({ name: method, rtype: 'promise' })) })),
+      PluginHeaders: Object.entries(methods).map(([name, entries]) => ({ name, methods: entries.map(method => ({ name: method, rtype: method === 'addListener' ? 'callback' : 'promise' })) })),
+      nativeCallback: (plugin, method) => plugin === 'Spotify' && method === 'addListener' ? 'mock-spotify-listener' : 'mock-listener',
       nativePromise: async (plugin, method, options) => {
         if (plugin === 'AndroidMedia') return { musicPlayerSync: false };
         if (plugin === 'AudioInput') return {};
@@ -70,4 +71,4 @@ const assert = require('node:assert/strict');
   assert.deepEqual(errors, [], 'No unhandled JavaScript errors');
   console.log('PASS: remembered Spotify reconnect, playback restoration, no redundant OAuth, and opt-out across reloads.');
   await browser.close();
-})().catch(error => { console.error(error); process.exitCode = 1; });
+})().catch(error => { console.error(error); process.exit(1); });
