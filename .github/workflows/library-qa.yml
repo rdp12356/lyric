@@ -31,6 +31,7 @@ jobs:
       - name: Pure data and Spotify regression tests
         run: |
           node tests/music-library.cjs
+          node tests/web-media-session.cjs
           node tests/web-spotify-auth.cjs
           node tests/web-spotify-playback.cjs
           node tests/lrclib-refresh.cjs
