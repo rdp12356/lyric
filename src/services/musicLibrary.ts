@@ -67,7 +67,7 @@ export function sanitizeTrack(input: unknown): SavedTrack | null {
     albumArt: safeHttps(candidate.albumArt),
     duration: Number.isFinite(duration) ? Math.max(0, Math.min(duration, 86400)) : 0,
     source: candidate.source as AudioSourceType,
-    ...(audioUrl && allowPreview(audioUrl) ? { audioUrl } : {})
+    ...(audioUrl && allowPreview(audioUrl) && (candidate.source === 'demo' || candidate.source === 'search') ? { audioUrl } : {})
   };
 }
 const safeTracks = (input: unknown, max: number): SavedTrack[] => {
@@ -318,5 +318,6 @@ export function playbackTrack(saved: SavedTrack): Track {
   return { ...saved, position: 0, isPlaying: false };
 }
 export function canPlaySavedTrack(track: SavedTrack): boolean {
+  if (track.source !== 'demo' && track.source !== 'search') return false;
   return !!track.audioUrl || (track.source === 'demo' && track.id.startsWith('demo-'));
 }
