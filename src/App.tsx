@@ -28,6 +28,7 @@ import { TrackSearchModal } from './components/TrackSearchModal';
 import { useLiquidGlass } from './hooks/useLiquidGlass';
 import { MusicLibraryDrawer } from './components/MusicLibraryDrawer';
 import { musicLibrary, playbackTrack, canPlaySavedTrack, type SavedTrack } from './services/musicLibrary';
+import { attachLyricMediaControls, setLyricMediaMetadata, setLyricMediaPosition, type WebMediaActions } from './services/webMediaSession';
 
 import {
   Sun,
@@ -88,6 +89,7 @@ export const App: React.FC = () => {
   const sourceRef = useRef(currentTrack.source);
   sourceRef.current = currentTrack.source;
   const playOnTrackChange = useRef(false);
+  const mediaControlsRef = useRef<WebMediaActions>({ playPause() {}, next() {}, previous() {}, seek() {} });
 
   // Attach ybouane/liquidglass WebGL shader to glass HTML elements (darker, translucent glass)
   useLiquidGlass(rootContainerRef, [lockscreenBarRef, playerCardRef], {
@@ -380,6 +382,27 @@ export const App: React.FC = () => {
     globalClock.reset(seconds, isPlaying);
     setCurrentTime(seconds);
   }, [currentTrack, isPlaying]);
+
+  // Media controls are registered for Lyric-owned audio only. Spotify controls
+  // stay with Spotify; the Media Session handlers never recreate on each frame.
+  mediaControlsRef.current = {
+    playPause: handlePlayPause,
+    next: () => handleNext(),
+    previous: handlePrev,
+    seek: handleSeek
+  };
+  useEffect(() => {
+    if (currentTrack.source.startsWith('macos-') || currentTrack.source === 'spotify-web'
+      || currentTrack.source === 'android-media') return;
+    return attachLyricMediaControls(() => mediaControlsRef.current);
+  }, [currentTrack.source]);
+  useEffect(() => {
+    setLyricMediaMetadata(currentTrack, isPlaying);
+  }, [currentTrack.id, currentTrack.title, currentTrack.artist, currentTrack.album, currentTrack.albumArt, currentTrack.source, isPlaying]);
+  useEffect(() => {
+    if (currentTrack.source.startsWith('macos-')) return;
+    setLyricMediaPosition(currentTime, duration, isPlaying);
+  }, [Math.floor(currentTime), duration, isPlaying, currentTrack.source]);
 
   const handleSelectSearchedTrack = useCallback((track: Track) => {
     musicLibrary.playNow(track);
