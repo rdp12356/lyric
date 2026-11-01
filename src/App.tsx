@@ -175,125 +175,116 @@ export const App: React.FC = () => {
     if (isPlaying) void audio.play().catch(() => setIsPlaying(false));
   }, [currentTrack.id, currentTrack.audioUrl, currentTrack.source]);
 
-  // 2. High-Precision 120Hz / 60Hz RequestAnimationFrame Tick Loop
+  // 2. Coalesced visual updates: the monotonic clock stays precise, but React
+  // sees at most ~30 updates/second and no imperceptible energy changes.
   useEffect(() => {
-    let loopId: number;
-
-    const tick = () => {
-      const nowPos = globalClock.now();
-      setCurrentTime(previous => Math.abs(previous - nowPos) >= 0.03 ? nowPos : previous);
-
-      if (isPlaying) {
-        const energy = visualizerEngine.getAudioEnergy(nowPos, isPlaying);
-        setAudioEnergy(energy);
-      } else {
-        setAudioEnergy({ bass: 0.05, mid: 0.05, treble: 0.05, overall: 0.05 });
+    let loopId = 0;
+    let lastPaint = 0;
+    const resting = { bass: 0.05, mid: 0.05, treble: 0.05, overall: 0.05 };
+    const tick = (time: number) => {
+      if (!document.hidden && time - lastPaint >= 33) {
+        lastPaint = time;
+        const nowPos = globalClock.now();
+        setCurrentTime(previous => Math.abs(previous - nowPos) > 0.028 ? nowPos : previous);
+        if (isPlaying) {
+          const next = visualizerEngine.getAudioEnergy(nowPos, true);
+          setAudioEnergy(previous => {
+            const delta = Math.max(
+              Math.abs(previous.bass - next.bass), Math.abs(previous.mid - next.mid),
+              Math.abs(previous.treble - next.treble), Math.abs(previous.overall - next.overall)
+            );
+            return delta > 0.018 ? next : previous;
+          });
+        } else {
+          setAudioEnergy(previous => previous.overall !== resting.overall ? resting : previous);
+        }
       }
-
       loopId = requestAnimationFrame(tick);
     };
-
     loopId = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(loopId);
   }, [isPlaying]);
 
-  // 3. Extract palette and load lyrics when track changes
+  // 3. Artwork color extraction and lyrics retrieval are separate. A new cover
+  // image for the SAME recording must not invalidate or refetch its lyrics.
   useEffect(() => {
-    let isCancelled = false;
-
-    extractPaletteFromImage(currentTrack.albumArt).then((palette) => {
-      if (!isCancelled) setExtractedPalette(palette);
-    });
-
+    let cancelled = false;
+    void extractPaletteFromImage(currentTrack.albumArt)
+      .then(palette => { if (!cancelled) setExtractedPalette(palette); })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [currentTrack.albumArt]);
+  useEffect(() => {
+    let cancelled = false;
+    setLyrics(null);
     setLyricsLoading(true);
-    fetchLyricsFromLRCLIB(
-      currentTrack.title,
-      currentTrack.artist,
-      currentTrack.album,
-      currentTrack.duration
-    ).then((res) => {
-      if (!isCancelled) {
-        setLyrics(res);
-        setLyricsLoading(false);
-      }
+    void fetchLyricsFromLRCLIB(
+      currentTrack.title, currentTrack.artist, currentTrack.album, currentTrack.duration
+    ).then(result => {
+      if (cancelled) return;
+      setLyrics(result); setLyricsLoading(false);
+    }).catch(() => {
+      if (cancelled) return;
+      setLyrics(null); setLyricsLoading(false);
     });
+    return () => { cancelled = true; };
+  }, [currentTrack.id, currentTrack.title, currentTrack.artist, currentTrack.album, currentTrack.duration]);
 
-
-    return () => {
-      isCancelled = true;
-    };
-  }, [currentTrack]);
-
-  // 4. macOS Bridge Polling (every 350ms)
+  // 4. One desktop bridge poller, adaptive to visibility/availability.
+  // The previous [currentTrack] dependency restarted polling on artwork edits.
   useEffect(() => {
-    let timer: any;
-    let isMounted = true;
-
-    const pollBridge = async () => {
-      const isOnline = await checkBridgeHealth();
-      if (!isMounted) return;
-      setIsMacBridgeOnline(isOnline);
-
-      if (isOnline) {
-        const macState = await fetchMacOSNowPlaying();
-        if (macState && (macState.state === 'playing' || macState.state === 'paused')) {
-          const macSource = macState.activeApp === 'Spotify' ? 'macos-spotify' : 'macos-music';
-          const isPlayingState = macState.state === 'playing';
-
-          if (
-            currentTrack.title !== macState.track ||
-            currentTrack.artist !== macState.artist ||
-            currentTrack.source !== macSource
-          ) {
-            let artwork = macState.artworkUrl;
-            if (!artwork && macState.track && macState.artist) {
-              artwork = (await fetchArtworkForTrack(macState.track, macState.artist)) || undefined;
-            }
-
-            libraryStore.markNowPlaying({
-              id: 'macos-' + [macSource, macState.track, macState.artist, macState.album].join('|'),
-              title: macState.track, artist: macState.artist, album: macState.album || '',
-              albumArt: artwork || '', duration: macState.duration || 0,
-              position: macState.position || 0, isPlaying: isPlayingState, source: macSource
-            });
-            setCurrentTrack({
-              id: 'macos-' + [macSource, macState.track, macState.artist, macState.album].join('|'),
-              title: macState.track,
-              artist: macState.artist,
-              album: macState.album || 'Now Playing',
-              albumArt: artwork || 'https://images.unsplash.com/photo-1514525253161-7a46d19cd819?w=600&auto=format&fit=crop&q=80',
-              duration: macState.duration || 200,
-              position: macState.position || 0,
-              isPlaying: isPlayingState,
-              source: macSource,
-              badge: `${macState.activeApp}`
-            });
-
-            setDuration(macState.duration);
-            setIsPlaying(isPlayingState);
-            globalClock.sync(macState.position, isPlayingState, macState.latencyMs || 180);
-          } else {
-            setIsPlaying(isPlayingState);
-            globalClock.sync(macState.position, isPlayingState, macState.latencyMs || 180);
-
-            if (macState.artworkUrl && currentTrack.albumArt !== macState.artworkUrl) {
-              setCurrentTrack(t => ({ ...t, albumArt: macState.artworkUrl! }));
-            }
+    let cancelled = false, timer: ReturnType<typeof setTimeout>;
+    const poll = async () => {
+      if (cancelled || document.hidden) return;
+      let interval = 3500;
+      try {
+        const online = await checkBridgeHealth();
+        if (cancelled) return;
+        setIsMacBridgeOnline(online);
+        if (online) {
+          interval = 1350;
+          const state = await fetchMacOSNowPlaying();
+          if (cancelled || !state || !state.track || (state.state !== 'playing' && state.state !== 'paused')) return;
+          const source = state.activeApp === 'Spotify' ? 'macos-spotify' : 'macos-music';
+          const playing = state.state === 'playing';
+          const previous = currentTrackRef.current;
+          const identity = 'macos-' + [source, state.track, state.artist, state.album].join('|');
+          if (previous.id !== identity) {
+            let art = state.artworkUrl;
+            if (!art) art = await fetchArtworkForTrack(state.track, state.artist) || undefined;
+            if (cancelled) return;
+            const next: Track = {
+              id: identity, title: state.track, artist: state.artist,
+              album: state.album || 'Now Playing', albumArt: art || '',
+              duration: state.duration || 0, position: state.position || 0,
+              isPlaying: playing, source, badge: state.activeApp
+            };
+            libraryStore.markNowPlaying(next);
+            setCurrentTrack(next);
+            setDuration(next.duration);
+          } else if (state.artworkUrl && previous.albumArt !== state.artworkUrl) {
+            setCurrentTrack(track => ({ ...track, albumArt: state.artworkUrl! }));
           }
+          setIsPlaying(playing);
+          globalClock.sync(state.position || 0, playing, state.latencyMs || 0);
         }
-      }
-
-      if (isMounted) {
-        timer = setTimeout(pollBridge, 350);
+      } catch { /* Local desktop helper is optional. */ }
+      finally {
+        if (!cancelled && !document.hidden) timer = setTimeout(poll, interval);
       }
     };
-
-    pollBridge();
-    return () => {
-      isMounted = false;
+    const visibility = () => {
       clearTimeout(timer);
+      if (!document.hidden) void poll();
     };
-  }, [currentTrack]);
+    document.addEventListener('visibilitychange', visibility);
+    void poll();
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+      document.removeEventListener('visibilitychange', visibility);
+    };
+  }, []);
 
   // Controls: Spotify/macOS remains an external source; local queue entries
   // are never promoted to full streaming tracks without an authorized audio URL.
