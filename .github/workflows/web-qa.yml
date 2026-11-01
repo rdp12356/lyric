@@ -28,8 +28,10 @@ jobs:
         run: npm ci --ignore-scripts
       - name: TypeScript and Vite production build
         run: npm run build
-      - name: Spotify PKCE authorization regression tests
-        run: node tests/web-spotify-auth.cjs
+      - name: Spotify PKCE and Web API playback regression tests
+        run: |
+          node tests/web-spotify-auth.cjs
+          node tests/web-spotify-playback.cjs
       - name: Lyrics cache, clock and desktop security regressions
         run: |
           node tests/lrclib-refresh.cjs
