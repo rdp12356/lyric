@@ -31,7 +31,7 @@ const bad = sanitizeTrack({
 });
 assert.equal(bad.albumArt, '');
 assert.equal(bad.audioUrl, undefined);
-assert.equal(canPlaySavedTrack(bad), true, 'built-in demo preview can be resolved by ID');
+assert.equal(canPlaySavedTrack(bad), false, 'a forged demo ID is not playable without an approved preview URL');
 const local = sanitizeTrack({ ...a, id: 'local-blob', source: 'local-file', audioUrl: 'blob:secret' });
 assert.equal(local.audioUrl, undefined);
 assert.equal(canPlaySavedTrack(local), false);
