@@ -217,7 +217,8 @@ export function mergeLibraryBackup(current: LibraryState, input: string): Librar
     mergedCatalog.push(track); used.add(track.id);
   }
   const playlistIds = new Set(current.playlists.map(p => p.id));
-  const playlists = [...current.playlists];
+  // Copy nested arrays: merging must never mutate the current snapshot.
+  const playlists = current.playlists.map(p => ({ ...p, trackIds: [...p.trackIds] }));
   for (const p of backup.playlists) {
     if (playlistIds.has(p.id)) {
       const existing = playlists.find(row => row.id === p.id)!;
