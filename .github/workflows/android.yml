@@ -2,9 +2,9 @@ name: Android APK
 
 on:
   push:
-    branches: [main, android-port, 'fix/spotify-android-deep-link', 'fix/spotify-lyrics-lookup', 'fix/spotify-persistent-session-performance', 'feat/spotify-event-sync-smooth-lyrics']
+    branches: [main, android-port, 'fix/spotify-android-deep-link', 'fix/spotify-lyrics-lookup', 'fix/spotify-persistent-session-performance', 'feat/spotify-event-sync-smooth-lyrics', 'fix/refresh-lrclib-lyrics']
   pull_request:
-    branches: [main, android-port, 'fix/spotify-lyrics-lookup', 'fix/spotify-persistent-session-performance']
+    branches: [main, android-port, 'fix/spotify-lyrics-lookup', 'fix/spotify-persistent-session-performance', 'feat/spotify-event-sync-smooth-lyrics']
   workflow_dispatch:
 
 permissions:

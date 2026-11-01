@@ -1,3 +1,22 @@
+# Lyric Android 1.5.1 — refresh LRCLIB lyrics correctly
+
+Spotify's official Android App Remote does not expose Spotify's lyric database. Lyric continues to use LRCLIB for free line-synchronized lyrics. LRCLIB requires no public API key and supports HTTPS requests directly from the Android WebView.
+
+## Refresh current Spotify lyrics
+
+1. Play a song in Spotify and open Lyric.
+2. Tap **Sources & settings** → **Playback & lyrics**.
+3. Choose **Refresh current song lyrics from LRCLIB**. This discards the current song's cached LRCLIB result and performs a fresh lookup.
+4. If LRCLIB has no synchronized version of the recording, Lyric may show plain lyrics with explicitly estimated timing or report that the track is missing. The **Retry lyrics lookup** action on the empty screen now also performs a real forced refresh.
+5. For uncommon tracks, search alternative releases or import your own synchronized `.lrc` file.
+
+**Changes:** automatic successful-result cache expires after seven days; manually imported LRC lyrics are retained offline unless the user explicitly chooses to refresh/replace them. Concurrent automatic lookups for the same song are deduplicated. Search prioritizes exact Spotify duration and album then progressively relaxes the match. Lyrics from recordings more than 25 seconds different are rejected to prevent obviously mistimed matches. API 429 Retry-After is respected.
+
+**Alternative sources:** Because unrestricted third-party services often use unofficial scraping or serve only plain unsynchronized lyrics, this release does not switch providers automatically. We can add a documented and licensed fallback later if a dependable one is available. The Spotify authorization flow is unchanged.
+
+**Limits:** LRCLIB doesn't guarantee lyrics coverage. Word-by-word timing from line-synced LRC is estimated; true word sync requires actual word timestamps. Physical-device testing is still necessary.
+
+---
 # Lyric Android 1.5.0 — smoother Spotify-synced lyrics
 
 **What changed:** Spotify App Remote now pushes `playerState` events directly to the UI for immediate track and pause/resume transitions. A less frequent (~1.4s) playback read corrects clock drift, refreshes album artwork, and works as a fallback if event subscriptions aren't available. Older in-flight polls cannot overwrite newer events. The lyrics clock interpolates smoothly between updates, with bounded corrections for ordinary jitter and immediate resets for seeks.

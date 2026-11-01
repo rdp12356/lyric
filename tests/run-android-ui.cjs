@@ -1,6 +1,7 @@
 const { spawnSync } = require('node:child_process');
 const tests = [
   'tests/sync-audio.cjs',
+  'tests/lrclib-refresh.cjs',
   'tests/android-smoke.cjs',
   'tests/android-media-smoke.cjs',
   'tests/spotify-reconnect-smoke.cjs',

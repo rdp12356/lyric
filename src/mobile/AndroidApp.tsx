@@ -10,7 +10,7 @@ import { AudioInput, WebMicrophone } from '../services/audioInput';
 import { createTrackFromFile, DEMO_TRACKS, visualizerEngine } from '../services/audioManager';
 import { extractPaletteFromImage, PRESET_PALETTES } from '../services/colorExtractor';
 import { lookupLyricsFromLRCLIB, type LyricsLookupIssue } from '../services/lrclib';
-import { cacheLyrics, cachedLyrics, lyricsKey } from '../services/lyricsCache';
+import { cacheLyrics, cachedLyrics, lyricsKey, removeCachedLyrics } from '../services/lyricsCache';
 import { parseLRC } from '../services/lrcParser';
 import { BeatEnvelope, SILENCE, AudioEnergy } from '../services/beatEnvelope';
 import { SyncClock } from '../services/syncClock';
@@ -81,6 +81,7 @@ export default function AndroidApp() {
   const fileInput = useRef<HTMLInputElement>(null);
   const lrcInput = useRef<HTMLInputElement>(null);
   const importedLyrics = useRef(false);
+  const forceLyricsRefresh = useRef(false);
   const eventRevision = useRef(0);
   const rim = prefs.rim;
   const activePalette = rim.palettePreset === 'album-art' ? palette : PRESET_PALETTES[rim.palettePreset] || palette;
@@ -306,7 +307,9 @@ export default function AndroidApp() {
     if (!track || importedLyrics.current) return;
     let cancelled = false;
     setLyricsIssue('');
-    const cached = cachedLyrics(lyricsKey(track.title, track.artist, track.album, duration));
+    const refresh = forceLyricsRefresh.current;
+    forceLyricsRefresh.current = false;
+    const cached = refresh ? null : cachedLyrics(lyricsKey(track.title, track.artist, track.album, duration));
     if (cached) { setLyrics(cached); setLoading(false); return; }
     setLoading(true);
     const descriptions: Record<LyricsLookupIssue, string> = {
@@ -317,7 +320,7 @@ export default function AndroidApp() {
       'service-error': 'LRCLIB is temporarily unavailable. Try again later or import an LRC file.'
     };
     const timer = setTimeout(() => {
-      void lookupLyricsFromLRCLIB(track.title, track.artist, track.album, duration)
+      void lookupLyricsFromLRCLIB(track.title, track.artist, track.album, duration, { refresh })
         .then(result => {
           if (cancelled || importedLyrics.current) return;
           setLyrics(result.lyrics);
@@ -333,6 +336,17 @@ export default function AndroidApp() {
     }, 250);
     return () => { cancelled = true; clearTimeout(timer); };
   }, [track?.id, track?.title, track?.artist, duration, lyricsRetryToken]);
+  /** Explicit user action: re-fetch this song, ignoring any cached LRCLIB result. */
+  const refreshCurrentLyrics = () => {
+    const current = trackRef.current;
+    if (!current) return;
+    // Imported local LRC stays untouched unless the user selects this action.
+    importedLyrics.current = false;
+    removeCachedLyrics(lyricsKey(current.title, current.artist, current.album, current.duration || duration));
+    forceLyricsRefresh.current = true;
+    setLyricsIssue(''); setLyrics(null); setLoading(true);
+    setLyricsRetryToken(value => value + 1);
+  };
   const stopMic = useCallback(() => { if (isAndroid) void AudioInput.stop().catch(() => {}); else microphone.current.stop(); micEnergy.current = SILENCE; setMicActive(false); }, []);
   useEffect(() => {
     if (!micActive || !isAndroid) return;
@@ -497,7 +511,7 @@ export default function AndroidApp() {
         {isAndroid && <button className="mobile-secondary" onClick={() => setSettings(true)}><Radio size={17}/> Connect music</button>}
         <button className="mobile-text-button" onClick={() => { setQueue(DEMO_TRACKS); void selectTrack(DEMO_TRACKS[0]); }}>Try a song preview</button>
         <button className="mobile-text-button" onClick={() => openSearch(true)}>Find lyrics for another player</button>
-      </div> : loading && !lyrics ? <div className="mobile-welcome"><Music2 className="animate-pulse" size={32}/><p>Finding the words…</p></div> : <SyncedLyricsView lyrics={lyrics} currentTime={Math.max(0, position + offset / 1000)} duration={duration} palette={activePalette} style={prefs.style} unavailableMessage={lyricsIssue} onRetry={() => { setLyricsIssue(''); setLyricsRetryToken(value => value + 1); }} onSeek={s => void seek(s)} onSearchOpen={() => openSearch(source !== 'local')} />}
+      </div> : loading && !lyrics ? <div className="mobile-welcome"><Music2 className="animate-pulse" size={32}/><p>Finding the words…</p></div> : <SyncedLyricsView lyrics={lyrics} currentTime={Math.max(0, position + offset / 1000)} duration={duration} palette={activePalette} style={prefs.style} unavailableMessage={lyricsIssue} onRetry={refreshCurrentLyrics} onSeek={s => void seek(s)} onSearchOpen={() => openSearch(source !== 'local')} />}
     </main>
     {error && <div className="mobile-error" role="alert"><span>{error}</span><button aria-label="Dismiss error" onClick={() => setError('')}><X size={18}/></button></div>}
     {track && !focus && <section className="mobile-player glass-panel" aria-label="Music player">
@@ -550,7 +564,7 @@ export default function AndroidApp() {
       {supportsMusicSync && <section className="mobile-settings-section"><h3>Android music player</h3><p className="mobile-note">Follows media sessions without Spotify API credentials. Requires optional notification access and may be restricted by Android or Play Protect.</p><label className="mobile-field">Preferred player<select value={prefs.preferredPlayer} onChange={e=>setPrefs(p=>({...p,preferredPlayer:e.target.value}))}><option value="">Automatic</option><option value="com.spotify.music">Spotify</option>{players.filter(p=>p.packageName!=='com.spotify.music').map(p=><option key={p.packageName} value={p.packageName}>{p.label}</option>)}</select></label><button className="mobile-secondary" onClick={async()=>{try{await AndroidMedia.openSettings();switchSource('device');}catch(e){setError(message(e,'Could not open notification settings'));}}}>Enable notification access</button><button className="mobile-secondary" onClick={()=>switchSource('device')}>Listen to music player</button></section>}
       <section className="mobile-settings-section"><h3>Lighting</h3><p className="mobile-note">Local files drive the edges from their real audio spectrum. For music playing through speakers, enable the microphone. It won’t hear Spotify audio confined to headphones. The microphone stops when Lyric leaves the foreground; nothing is saved or uploaded.</p><button className="mobile-secondary" onClick={() => void toggleMic()}><Mic size={17}/>{micActive?'Stop microphone':'Use microphone for beats'}</button><label className="mobile-field">Graphics quality<select value={prefs.graphicsMode} onChange={e => setPrefs(p => ({ ...p, graphicsMode: e.target.value as 'smooth' | 'cinematic' }))}><option value="smooth">Smooth (recommended · less GPU work)</option><option value="cinematic">Cinematic (full visual effects)</option></select></label><label className="mobile-field">Light pattern<select value={rim.mode} onChange={e=>setPrefs(p=>({...p,rim:{...p.rim,mode:e.target.value as RimMode}}))}>{(['pulse','wave','aurora','liquid','static'] as RimMode[]).map(mode=><option key={mode} value={mode}>{mode[0].toUpperCase()+mode.slice(1)}</option>)}</select></label><label className="mobile-field">Color palette<select value={rim.palettePreset} onChange={e=>setPrefs(p=>({...p,rim:{...p.rim,palettePreset:e.target.value as PalettePreset}}))}>{Object.keys(PRESET_PALETTES).map(name=><option key={name} value={name}>{name==='album-art'?'Album colors':name}</option>)}</select></label>
       <label className="mobile-range">Beat sensitivity <span>{prefs.sensitivity.toFixed(1)}×</span><input aria-label="Beat sensitivity" type="range" min="0.5" max="4" step="0.1" value={prefs.sensitivity} onChange={e=>setPrefs(p=>({...p,sensitivity:Number(e.target.value)}))}/></label><label className="mobile-range">Brightness <span>{Math.round(rim.intensity*100)}%</span><input aria-label="Lighting brightness" type="range" min="0.1" max="1" step="0.05" value={rim.intensity} onChange={e=>setPrefs(p=>({...p,rim:{...p.rim,intensity:Number(e.target.value)}}))}/></label><label className="mobile-range">Edge width <span>{rim.thickness}px</span><input aria-label="Edge width" type="range" min="2" max="20" step="1" value={rim.thickness} onChange={e=>setPrefs(p=>({...p,rim:{...p.rim,thickness:Number(e.target.value)}}))}/></label></section>
-      <section className="mobile-settings-section"><h3>Playback & lyrics</h3><label className="mobile-field">Lyric style<select value={prefs.style} onChange={e=>setPrefs(p=>({...p,style:e.target.value as LyricStyle}))}><option value="smooth-captions">Smooth captions</option><option value="verci-single-word">Single word</option><option value="cinematic">Scrolling lines</option></select></label><label className="mobile-field">Sleep timer (keep Lyric open)<select aria-label="Sleep timer" value={sleepUntil?'on':'off'} onChange={e=>setSleepUntil(e.target.value==='off'?null:Date.now()+Number(e.target.value)*60000)}><option value="off">Off</option>{sleepUntil&&<option value="on">Timer is running</option>}<option value="15">15 minutes</option><option value="30">30 minutes</option><option value="60">60 minutes</option></select></label><button className="mobile-secondary" onClick={()=>{setSettings(false);setFocus(true);}}>Enter focus mode</button><p className="mobile-note">Recent lyrics and per-song calibration are saved on this device. Audio files are session-only. Search results are short previews. Lighting stays inside Lyric.</p></section>
+      <section className="mobile-settings-section"><h3>Playback & lyrics</h3><p className="mobile-note">Lyrics come from LRCLIB, not Spotify. A refresh bypasses the local lyrics cache and searches the latest available versions. Imported LRC files are replaced only if you tap Refresh.</p><button className="mobile-secondary" disabled={!track || loading} onClick={refreshCurrentLyrics}>Refresh current song lyrics from LRCLIB</button><label className="mobile-field">Lyric style<select value={prefs.style} onChange={e=>setPrefs(p=>({...p,style:e.target.value as LyricStyle}))}><option value="smooth-captions">Smooth captions</option><option value="verci-single-word">Single word</option><option value="cinematic">Scrolling lines</option></select></label><label className="mobile-field">Sleep timer (keep Lyric open)<select aria-label="Sleep timer" value={sleepUntil?'on':'off'} onChange={e=>setSleepUntil(e.target.value==='off'?null:Date.now()+Number(e.target.value)*60000)}><option value="off">Off</option>{sleepUntil&&<option value="on">Timer is running</option>}<option value="15">15 minutes</option><option value="30">30 minutes</option><option value="60">60 minutes</option></select></label><button className="mobile-secondary" onClick={()=>{setSettings(false);setFocus(true);}}>Enter focus mode</button><p className="mobile-note">Recent lyrics and per-song calibration are saved on this device. Audio files are session-only. Search results are short previews. Lighting stays inside Lyric.</p></section>
     </Sheet>}
   </div>;
 }
