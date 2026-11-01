@@ -1,5 +1,8 @@
 # Lyric ✦ Open-Source Ambient Rim Lighting & Kinetic Synced Lyrics
 
+> **Music-player development branch:** The existing Lyric app now includes a local queue, shuffle/repeat, playlists, favorites, a metadata-only Spotify playlist browser, backup/export and performance improvements. See [Music Player Upgrade architecture and status](docs/MUSIC_PLAYER_UPGRADE.md). This is a draft stacked branch and **not a deployed release**. Local library data stays on this device, and imported audio bytes do not become permanent offline downloads.
+
+
 > **Fork development note (2026-11-01):** This repository is adding an optional browser Spotify companion that follows an existing Spotify player without streaming music. Read [Browser Spotify setup](docs/WEB_SPOTIFY_SETUP.md) and [Repository audit and checklist](docs/REPOSITORY_AUDIT.md). The original web demo, desktop app and Android App Remote remain intact. Browser Spotify features are on a draft branch, **not deployed to GitHub Pages**. Links below referring to RithvikVatti are upstream project links, not evidence that this fork's changes are live.
 
 **New optional web companion (on this development branch):** Open the existing Lyric web app and select **Follow Spotify**, or append `?mode=spotify` to the root URL. Register the exact browser redirect URI shown in the Connect screen in the Spotify Dashboard; it differs from Android's `lyric://spotify-callback`. Playback controls are optional; LRCLIB supplies lyrics independently of Spotify.
