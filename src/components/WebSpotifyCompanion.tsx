@@ -70,7 +70,6 @@ export default function WebSpotifyCompanion() {
   const requestId = useRef(0);
   const lyricRequestId = useRef(0);
   const lrcInput = useRef<HTMLInputElement>(null);
-  const authChecked = useRef(false);
   const track = playback ? playerTrack(playback) : null;
   const trackId = track?.id || '';
   const activeCacheKey = track ? lyricsKey(track.name, track.artist, track.album, track.duration) : '';
@@ -83,10 +82,7 @@ export default function WebSpotifyCompanion() {
 
   useEffect(() => {
     try { localStorage.setItem('lyric.web.spotify.prefer-mode', 'true'); } catch { /* Optional. */ }
-    // StrictMode runs effects twice in development. The guard prevents duplicate
-    // OAuth exchanges for the same redirect callback.
-    if (authChecked.current) return;
-    authChecked.current = true;
+    // The authorization service deduplicates concurrent StrictMode callbacks.
     let alive = true;
     void (async () => {
       try {
@@ -299,8 +295,9 @@ export default function WebSpotifyCompanion() {
     setOffsetMs(number); saveOffset(trackId, number);
   };
   const resetAutomatic = () => {
-    setManualResult(false); setLyrics(null); setSearchOpen(false);
-    void refreshLyrics();
+    if (activeCacheKey) removeCachedLyrics(activeCacheKey);
+    setLyricsError(''); setManualResult(false); setLyrics(null); setSearchOpen(false);
+    if (!autoFollow) setAutoFollow(true);
   };
   const theme = useMemo(() => artwork ? {
     backgroundImage: 'linear-gradient(180deg, rgba(9,13,21,.84), rgba(7,8,13,.98)), url("' +
