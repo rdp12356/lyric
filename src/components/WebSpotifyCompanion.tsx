@@ -297,12 +297,15 @@ export default function WebSpotifyCompanion() {
   const seekSpotifyLine = useCallback(async (lineTime: number) => {
     if (!playback?.canSeek || !allowControls) return;
     try {
-      await spotifyWebControl('seek', lineTime);
-      clock.current.reset(lineTime, playback.playing);
-      setSeconds(lineTime);
+      // A positive lyric offset highlights early; seeking must reverse that
+      // offset to land on the actual Spotify playback timestamp.
+      const position = Math.max(0, Math.min(playback.duration, lineTime - offsetMs / 1000));
+      await spotifyWebControl('seek', position);
+      clock.current.reset(position, playback.playing);
+      setSeconds(position);
       setConnection('');
     } catch (error) { setConnection(describe(error)); }
-  }, [playback?.canSeek, playback?.playing, allowControls]);
+  }, [playback?.canSeek, playback?.playing, playback?.duration, allowControls, offsetMs]);
   const togglePlayback = async () => {
     if (!allowControls || !playback) return;
     try { await spotifyWebControl(playback.playing ? 'pause' : 'resume'); setConnection(''); }
