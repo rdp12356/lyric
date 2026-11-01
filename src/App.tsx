@@ -431,6 +431,9 @@ export const App: React.FC = () => {
       {/* 2. Top Bar: Pure White Minimal Floating Icons (Dynamic Slights & Fullscreen Only) */}
       <header className="relative z-30 w-full px-6 py-4 flex items-center justify-end pointer-events-none">
         <div className="pointer-events-auto flex items-center gap-3">
+          <a href={window.location.pathname + "?mode=spotify"}
+            className="rounded-full border border-emerald-400/30 bg-emerald-500/15 px-3 py-2 text-xs font-semibold text-emerald-200 transition hover:bg-emerald-500/25"
+            aria-label="Follow Spotify playback">Follow Spotify</a>
           {/* Dynamic Slights (Pure White Icon Only - No Button Styling) */}
           <button
             onClick={() => setRimConfig(c => ({ ...c, enabled: !c.enabled }))}
