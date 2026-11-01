@@ -22,7 +22,7 @@ export interface LyricsLookupResult {
   issue?: LyricsLookupIssue;
   retryAfterSeconds?: number;
 }
-export interface LyricsLookupOptions { refresh?: boolean }
+export interface LyricsLookupOptions { refresh?: boolean; signal?: AbortSignal }
 
 
 const pendingLookups = new Map<string, Promise<LyricsLookupResult>>();
@@ -39,9 +39,12 @@ const mainArtist = (s: string) => s.trim().split(/\s+(?:feat(?:uring)?\.?|ft\.?|
 const delay = (ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms));
 
 type ApiResult = { status: 'ok'; data: unknown } | { status: 'not-found' | 'network' | 'service-error' | 'rate-limited'; retryAfterSeconds?: number };
-async function api(path: string): Promise<ApiResult> {
+async function api(path: string, externalSignal?: AbortSignal): Promise<ApiResult> {
+  if (externalSignal?.aborted) throw new DOMException('Lyrics lookup aborted', 'AbortError');
   if (Date.now() < rateLimitUntil) return { status: 'rate-limited', retryAfterSeconds: Math.ceil((rateLimitUntil - Date.now()) / 1000) };
   const controller = new AbortController();
+  const abort = () => controller.abort();
+  externalSignal?.addEventListener('abort', abort, { once: true });
   const timeout = setTimeout(() => controller.abort(), 9000);
   try {
     const res = await fetch('https://lrclib.net' + path, {
@@ -60,9 +63,11 @@ async function api(path: string): Promise<ApiResult> {
     if (!res.ok) return { status: 'service-error' };
     return { status: 'ok', data: await res.json() };
   } catch {
+    if (externalSignal?.aborted) throw new DOMException('Lyrics lookup aborted', 'AbortError');
     return { status: 'network' };
   } finally {
     clearTimeout(timeout);
+    externalSignal?.removeEventListener('abort', abort);
   }
 }
 
@@ -127,7 +132,8 @@ function asLyrics(record: LrclibRecord, title: string, artist: string, album: st
  * Spotify supplies only track metadata/playback; lyrics come from LRCLIB.
  */
 async function lookupFresh(
-  trackName: string, artistName: string, albumName: string, duration: number
+  trackName: string, artistName: string, albumName: string, duration: number,
+  signal?: AbortSignal
 ): Promise<LyricsLookupResult> {
   const title = cleanTitle(trackName);
   const artist = mainArtist(artistName);
@@ -157,8 +163,9 @@ async function lookupFresh(
   const candidates = new Map<number, LrclibRecord>();
   let networkFailed = false, serviceFailed = false, instrumentalFound = false;
   for (let i = 0; i < distinctPaths.length; i++) {
+    if (signal?.aborted) throw new DOMException('Lyrics lookup aborted', 'AbortError');
     if (i > 0) await delay(275);
-    const response = await api(distinctPaths[i]);
+    const response = await api(distinctPaths[i], signal);
     if (response.status === 'rate-limited') return { lyrics: null, issue: 'rate-limited', retryAfterSeconds: response.retryAfterSeconds };
     if (response.status === 'network') { networkFailed = true; break; }
     if (response.status === 'service-error') { serviceFailed = true; continue; }
@@ -178,6 +185,7 @@ async function lookupFresh(
     (a, b) => matchScore(b, title, artist, albumName, duration) - matchScore(a, title, artist, albumName, duration)
   );
   for (const record of ranked) {
+    if (signal?.aborted) throw new DOMException('Lyrics lookup aborted', 'AbortError');
     const lyrics = asLyrics(record, trackName, artistName, albumName, duration);
     if (lyrics) {
       if (generation === (lookupGenerations.get(key) || 0)) cacheLyrics(key, lyrics);
@@ -202,12 +210,12 @@ export function lookupLyricsFromLRCLIB(
     lookupGenerations.set(key, (lookupGenerations.get(key) || 0) + 1);
     removeCachedLyrics(key);
     pendingLookups.delete(key);
-  } else {
+  } else if (!options.signal) {
     const pending = pendingLookups.get(key);
     if (pending) return pending;
   }
-  const work = lookupFresh(trackName, artistName, albumName, duration);
-  pendingLookups.set(key, work);
+  const work = lookupFresh(trackName, artistName, albumName, duration, options.signal);
+  if (!options.signal) pendingLookups.set(key, work);
   void work.then(
     () => { if (pendingLookups.get(key) === work) pendingLookups.delete(key); },
     () => { if (pendingLookups.get(key) === work) pendingLookups.delete(key); }
@@ -222,9 +230,9 @@ export async function fetchLyricsFromLRCLIB(
   return (await lookupLyricsFromLRCLIB(trackName, artistName, albumName, duration)).lyrics;
 }
 
-export async function searchLRCLIB(query: string): Promise<LrclibRecord[]> {
+export async function searchLRCLIB(query: string, signal?: AbortSignal): Promise<LrclibRecord[]> {
   if (!query.trim()) return [];
-  const response = await api('/api/search?' + new URLSearchParams({ q: query.trim() }));
+  const response = await api('/api/search?' + new URLSearchParams({ q: query.trim() }), signal);
   return response.status === 'ok' && Array.isArray(response.data)
     ? response.data.filter(validRecord)
     : [];
@@ -233,10 +241,11 @@ export async function searchLRCLIB(query: string): Promise<LrclibRecord[]> {
 
 /** Fetch an explicitly selected LRCLIB record; never guess an ID or release. */
 export async function fetchLRCLIBLyricsById(
-  id: number, trackName: string, artistName: string, albumName = '', duration = 0
+  id: number, trackName: string, artistName: string, albumName = '', duration = 0,
+  signal?: AbortSignal
 ): Promise<LyricsLookupResult> {
   if (!Number.isSafeInteger(id) || id < 1) return { lyrics: null, issue: 'not-found' };
-  const response = await api('/api/get/' + id);
+  const response = await api('/api/get/' + id, signal);
   if (response.status !== 'ok') return {
     lyrics: null, issue: response.status, retryAfterSeconds: response.retryAfterSeconds
   };
