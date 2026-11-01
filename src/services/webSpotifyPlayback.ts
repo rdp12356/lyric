@@ -1,4 +1,4 @@
-import { getSpotifyBrowserAccessToken } from './webSpotifyAuth';
+import { getSpotifyBrowserAccessToken, spotifyBrowserControlsAuthorized } from './webSpotifyAuth';
 
 export interface SpotifyWebPlayback {
   trackId: string;
@@ -98,9 +98,40 @@ export async function readWebSpotifyPlayback(signal?: AbortSignal): Promise<Play
       sampledAt: performance.now(),
       deviceName: data.device?.name || 'Spotify',
       deviceId: data.device?.id,
-      canSeek: false // Read-only scope; never offer controls the token does not have.
+      canSeek: spotifyBrowserControlsAuthorized() && !data.actions?.disallows?.seeking && !data.device?.is_restricted
     };
     return { playback, message: '' };
   }
   throw new PlaybackRequestError('Spotify authorization failed.', 401);
+}
+
+
+/** Optional remote control; Spotify remains the only music player. */
+export async function spotifyWebControl(action: 'seek' | 'pause' | 'resume', seconds?: number): Promise<void> {
+  if (!spotifyBrowserControlsAuthorized()) throw new PlaybackRequestError(
+    'Playback control was not authorized. Reconnect with the optional control permission.', 403
+  );
+  const endpoint = action === 'seek'
+    ? '/v1/me/player/seek?position_ms=' + Math.round((seconds || 0) * 1000)
+    : action === 'pause' ? '/v1/me/player/pause' : '/v1/me/player/play';
+  if (action === 'seek' && (!Number.isFinite(seconds) || seconds! < 0 || seconds! > 86400)) {
+    throw new Error('Invalid seek position.');
+  }
+  let token = await getSpotifyBrowserAccessToken();
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const response = await fetch('https://api.spotify.com' + endpoint, {
+      method: 'PUT',
+      headers: { Authorization: 'Bearer ' + token }
+    });
+    if (response.status === 401 && attempt === 0) {
+      token = await getSpotifyBrowserAccessToken(true);
+      continue;
+    }
+    if (response.ok) return;
+    if (response.status === 429) throw new PlaybackRequestError(
+      'Spotify asked us to slow down.', 429, retrySeconds(response)
+    );
+    if (response.status === 403) throw new PlaybackRequestError('Your Spotify account or device does not allow this playback control.', 403);
+    throw new PlaybackRequestError('Spotify playback control failed (' + response.status + ').', response.status);
+  }
 }
