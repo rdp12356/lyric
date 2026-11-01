@@ -3,7 +3,7 @@ import { Music2, RefreshCw, Search, LogOut, Check, AlertCircle, ArrowLeft, Downl
 import {
   beginSpotifyBrowserLogin, disconnectSpotifyBrowser, finishSpotifyBrowserCallback,
   getSpotifyBrowserAccessToken, hasRememberedSpotifySession,
-  savedSpotifyClientId, webSpotifyRedirectUri, spotifyBrowserControlsAuthorized
+  savedSpotifyClientId, webSpotifyRedirectUri, spotifyBrowserControlsAuthorized, spotifyBrowserLibraryAuthorized
 } from '../services/webSpotifyAuth';
 import {
   readWebSpotifyPlayback, spotifyWebControl, PlaybackRequestError, type SpotifyWebPlayback
@@ -15,6 +15,7 @@ import { SyncClock } from '../services/syncClock';
 import { SpotifyLyricsPanel } from './SpotifyLyricsPanel';
 import type { LyricsData } from '../types';
 import { libraryStore, useLibrary } from '../services/libraryStore';
+import { SpotifyCatalogPanel } from './SpotifyCatalogPanel';
 
 const OFFSET_STORE = 'lyric.web.song.offsets.v1';
 const FONT_STORE = 'lyric.web.font.size.v1';
@@ -48,6 +49,8 @@ export default function WebSpotifyCompanion() {
   const [clientId, setClientId] = useState(savedSpotifyClientId);
   const [remember, setRemember] = useState(true);
   const [allowControls, setAllowControls] = useState(spotifyBrowserControlsAuthorized);
+  const [allowLibrary, setAllowLibrary] = useState(spotifyBrowserLibraryAuthorized);
+  const [spotifyCatalogOpen, setSpotifyCatalogOpen] = useState(false);
   const [authError, setAuthError] = useState('');
   const [connection, setConnection] = useState('');
   const [playback, setPlayback] = useState<SpotifyWebPlayback | null>(null);
@@ -110,7 +113,7 @@ export default function WebSpotifyCompanion() {
         if (!alive) return;
         if (!authorized && !hasRememberedSpotifySession()) { setPhase('disconnected'); return; }
         await getSpotifyBrowserAccessToken();
-        if (alive) { setPhase('connected'); setAllowControls(spotifyBrowserControlsAuthorized()); setAuthError(''); }
+        if (alive) { setPhase('connected'); setAllowControls(spotifyBrowserControlsAuthorized()); setAllowLibrary(spotifyBrowserLibraryAuthorized()); setAllowLibrary(spotifyBrowserLibraryAuthorized()); setAuthError(''); }
       } catch (error) {
         if (alive) { setPhase('disconnected'); setAuthError(describe(error)); }
       }
@@ -128,7 +131,7 @@ export default function WebSpotifyCompanion() {
   const disconnect = useCallback(() => {
     requestId.current++; lyricRequestId.current++;
     disconnectSpotifyBrowser();
-    setPhase('disconnected'); setAllowControls(false); setPlayback(null); playbackRef.current = null;
+    setPhase('disconnected'); setAllowControls(false); setAllowLibrary(false); setSpotifyCatalogOpen(false); setPlayback(null); playbackRef.current = null;
     setLyrics(null); setConnection(''); setAuthError('');
     lastKey.current = ''; clock.current.reset(0, false);
   }, []);
@@ -366,6 +369,7 @@ export default function WebSpotifyCompanion() {
         <button className={BUTTON} onClick={goBack}><ArrowLeft className="inline h-4 w-4 mr-1" /> Original player</button>
         {phase === 'connected' && <button className={BUTTON} onClick={() => setSettings(value => !value)}
           aria-label="Lyrics settings"><Settings2 className="inline h-4 w-4" /></button>}
+        {phase === 'connected' && allowLibrary && <button className={BUTTON} onClick={() => setSpotifyCatalogOpen(true)} aria-label="Browse Spotify playlists">Spotify playlists</button>}
         {phase === 'connected' && <button className={BUTTON} onClick={disconnect}>
           <LogOut className="inline h-4 w-4 mr-1" /> Disconnect
         </button>}
@@ -392,6 +396,10 @@ export default function WebSpotifyCompanion() {
               Optional: allow lyric-line seeking and pause/resume controls (requests Spotify's extra playback-control permission).
             </label>
             <label className="flex items-start gap-2 text-xs text-white/60">
+              <input aria-label="Read Spotify playlists" type="checkbox" checked={allowLibrary} onChange={e => setAllowLibrary(e.target.checked)} />
+              Optional: read your Spotify profile and playlists. This is metadata browsing only and requires additional Spotify permissions.
+            </label>
+            <label className="flex items-start gap-2 text-xs text-white/60">
               <input aria-label="Remember Spotify sign-in" type="checkbox" checked={remember} onChange={e => setRemember(e.target.checked)} />
               Remember my connection on this browser (stores a refresh token in browser storage, which is less secure than a backend).
             </label>
@@ -402,7 +410,7 @@ export default function WebSpotifyCompanion() {
             </div>
             <button className="w-full rounded-xl bg-[#1ed760] p-3 font-semibold text-[#06110a] disabled:opacity-40"
               disabled={!/^[a-f0-9]{32}$/i.test(clientId)}
-              onClick={() => void beginSpotifyBrowserLogin(clientId, remember, allowControls).catch(error => setAuthError(describe(error)))}>
+              onClick={() => void beginSpotifyBrowserLogin(clientId, remember, allowControls, allowLibrary).catch(error => setAuthError(describe(error)))}>
               Connect with Spotify
             </button>
             {hasRememberedSpotifySession() && <button className={BUTTON + ' w-full'} onClick={() => void reconnect()}>
@@ -491,5 +499,7 @@ export default function WebSpotifyCompanion() {
         </div>}
       </footer>
     </>}
+    <SpotifyCatalogPanel open={spotifyCatalogOpen && phase === 'connected' && allowLibrary}
+      onClose={() => setSpotifyCatalogOpen(false)} />
   </div>;
 }
