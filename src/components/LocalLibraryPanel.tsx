@@ -66,7 +66,7 @@ export function LocalLibraryPanel({ open, onClose, onPlay, nowPlayingId }: Props
     setTimeout(() => URL.revokeObjectURL(url), 1000);
     setNotice('Backup created locally. It contains metadata and playlists, never passwords, Spotify tokens or audio files.');
   };
-  const renderTracks = (ids: string[], canReorder = false, allowRemove = false) => {
+  const renderTracks = (ids: string[], canReorder = false, removeFrom: 'queue' | 'playlist' | null = null) => {
     const list = ids.filter(id => tracks.has(id) && (
       !query || (tracks.get(id)!.title + ' ' + tracks.get(id)!.artist).toLowerCase().includes(query.toLowerCase())
     ));
@@ -89,8 +89,8 @@ export function LocalLibraryPanel({ open, onClose, onPlay, nowPlayingId }: Props
           <button className={button} aria-label={'Move ' + track.title + ' up'} onClick={() => libraryStore.moveQueue(id, -1)}><ArrowUp size={13}/></button>
           <button className={button} aria-label={'Move ' + track.title + ' down'} onClick={() => libraryStore.moveQueue(id, 1)}><ArrowDown size={13}/></button>
         </>}
-        {allowRemove && <button className={button} title="Remove" aria-label={'Remove ' + track.title}
-          onClick={() => selectedPlaylist ? libraryStore.removeFromPlaylist(selectedPlaylist, id) : libraryStore.dequeue(id)}>
+        {removeFrom && <button className={button} title="Remove" aria-label={'Remove ' + track.title}
+          onClick={() => removeFrom === 'playlist' ? libraryStore.removeFromPlaylist(selectedPlaylist, id) : libraryStore.dequeue(id)}>
           <MinusCircle size={14}/>
         </button>}
       </div>;
@@ -135,7 +135,7 @@ export function LocalLibraryPanel({ open, onClose, onPlay, nowPlayingId }: Props
               onChange={event => libraryStore.setVolume(Number(event.target.value) / 100)}/>
             {Math.round(library.volume * 100)}%
           </label>
-          {renderTracks(library.queue, true, true)}
+          {renderTracks(library.queue, true, 'queue')}
         </>}
         {section === 'favorites' && <>
           {nowPlayingId && tracks.has(nowPlayingId) && <button className={button}
@@ -161,7 +161,7 @@ export function LocalLibraryPanel({ open, onClose, onPlay, nowPlayingId }: Props
             {nowPlayingId && tracks.has(nowPlayingId) && <button className={button}
               onClick={() => libraryStore.addToPlaylist(activePlaylist.id, nowPlayingId)}>
               <ListPlus className="inline mr-2" size={14}/> Add current song</button>}
-            {renderTracks(activePlaylist.trackIds, false, true)}
+            {renderTracks(activePlaylist.trackIds, false, 'playlist')}
           </>}
           {!library.playlists.length && <p className="text-xs text-white/45">Create your first playlist to organize local tracks, previews and song metadata.</p>}
         </>}
