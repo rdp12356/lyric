@@ -156,6 +156,11 @@ export class MusicLibraryStore {
     }));
     return true;
   }
+  /** Mark a restored queue selection without falsely recording a song as played. */
+  selectQueueItem(id: string) {
+    if (!this.state.queue.some(t => t.id === id)) return;
+    this.update(s => ({ ...s, currentId: id }));
+  }
   playNow(input: Track | SavedTrack): SavedTrack | null {
     const track = sanitizeTrack(input);
     if (!track) return null;
