@@ -2,7 +2,7 @@ import { LyricsData } from '../types';
 import { cachedLyrics, cacheLyrics, lyricsKey, removeCachedLyrics } from './lyricsCache';
 import { parseLRC, convertPlainToEstimatedLines } from './lrcParser';
 
-interface LrclibRecord {
+export interface LrclibRecord {
   id: number;
   name?: string;
   trackName: string;
@@ -228,4 +228,20 @@ export async function searchLRCLIB(query: string): Promise<LrclibRecord[]> {
   return response.status === 'ok' && Array.isArray(response.data)
     ? response.data.filter(validRecord)
     : [];
+}
+
+
+/** Fetch an explicitly selected LRCLIB record; never guess an ID or release. */
+export async function fetchLRCLIBLyricsById(
+  id: number, trackName: string, artistName: string, albumName = '', duration = 0
+): Promise<LyricsLookupResult> {
+  if (!Number.isSafeInteger(id) || id < 1) return { lyrics: null, issue: 'not-found' };
+  const response = await api('/api/get/' + id);
+  if (response.status !== 'ok') return {
+    lyrics: null, issue: response.status, retryAfterSeconds: response.retryAfterSeconds
+  };
+  if (!validRecord(response.data)) return { lyrics: null, issue: 'not-found' };
+  const record = response.data;
+  const lyrics = asLyrics(record, trackName, artistName, albumName, duration);
+  return { lyrics, issue: lyrics ? undefined : record.instrumental ? 'instrumental' : 'not-found' };
 }
