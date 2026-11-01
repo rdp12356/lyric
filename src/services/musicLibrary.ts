@@ -169,7 +169,7 @@ export class MusicLibraryStore {
         s.queue.map(t => t.id === track.id ? track : t) : [...s.queue, track].slice(-200);
       return {
         ...s, queue, currentId: track.id,
-        shuffleHistory: [...s.shuffleHistory, track.id].slice(-200),
+        shuffleHistory: s.shuffleHistory[s.shuffleHistory.length - 1] === track.id ? s.shuffleHistory : [...s.shuffleHistory, track.id].slice(-200),
         recent: addUnique(s.recent, track, 80)
       };
     });
