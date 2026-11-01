@@ -51,6 +51,7 @@ export default function WebSpotifyCompanion() {
   const [allowControls, setAllowControls] = useState(spotifyBrowserControlsAuthorized);
   const [allowLibrary, setAllowLibrary] = useState(spotifyBrowserLibraryAuthorized);
   const [spotifyCatalogOpen, setSpotifyCatalogOpen] = useState(false);
+  const closeSpotifyCatalog = useCallback(() => setSpotifyCatalogOpen(false), []);
   const [authError, setAuthError] = useState('');
   const [connection, setConnection] = useState('');
   const [playback, setPlayback] = useState<SpotifyWebPlayback | null>(null);
@@ -500,6 +501,6 @@ export default function WebSpotifyCompanion() {
       </footer>
     </>}
     <SpotifyCatalogPanel open={spotifyCatalogOpen && phase === 'connected' && allowLibrary}
-      onClose={() => setSpotifyCatalogOpen(false)} />
+      onClose={closeSpotifyCatalog} />
   </div>;
 }
