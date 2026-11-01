@@ -2,7 +2,7 @@ import { LyricsData } from '../types';
 import { cachedLyrics, cacheLyrics, lyricsKey, removeCachedLyrics } from './lyricsCache';
 import { parseLRC, convertPlainToEstimatedLines } from './lrcParser';
 
-interface LrclibRecord {
+export interface LrclibRecord {
   id: number;
   name?: string;
   trackName: string;
@@ -22,7 +22,7 @@ export interface LyricsLookupResult {
   issue?: LyricsLookupIssue;
   retryAfterSeconds?: number;
 }
-export interface LyricsLookupOptions { refresh?: boolean }
+export interface LyricsLookupOptions { refresh?: boolean; signal?: AbortSignal }
 
 
 const pendingLookups = new Map<string, Promise<LyricsLookupResult>>();
@@ -39,9 +39,12 @@ const mainArtist = (s: string) => s.trim().split(/\s+(?:feat(?:uring)?\.?|ft\.?|
 const delay = (ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms));
 
 type ApiResult = { status: 'ok'; data: unknown } | { status: 'not-found' | 'network' | 'service-error' | 'rate-limited'; retryAfterSeconds?: number };
-async function api(path: string): Promise<ApiResult> {
+async function api(path: string, externalSignal?: AbortSignal): Promise<ApiResult> {
+  if (externalSignal?.aborted) throw new DOMException('Lyrics lookup aborted', 'AbortError');
   if (Date.now() < rateLimitUntil) return { status: 'rate-limited', retryAfterSeconds: Math.ceil((rateLimitUntil - Date.now()) / 1000) };
   const controller = new AbortController();
+  const abort = () => controller.abort();
+  externalSignal?.addEventListener('abort', abort, { once: true });
   const timeout = setTimeout(() => controller.abort(), 9000);
   try {
     const res = await fetch('https://lrclib.net' + path, {
@@ -60,9 +63,11 @@ async function api(path: string): Promise<ApiResult> {
     if (!res.ok) return { status: 'service-error' };
     return { status: 'ok', data: await res.json() };
   } catch {
+    if (externalSignal?.aborted) throw new DOMException('Lyrics lookup aborted', 'AbortError');
     return { status: 'network' };
   } finally {
     clearTimeout(timeout);
+    externalSignal?.removeEventListener('abort', abort);
   }
 }
 
@@ -72,12 +77,29 @@ function validRecord(value: unknown): value is LrclibRecord {
     && typeof (value as LrclibRecord).artistName === 'string';
 }
 
+function recordingVersions(title: string) {
+  return {
+    live: /(?:\blive\b|\bunplugged\b)/i.test(title),
+    acoustic: /\bacoustic\b/i.test(title),
+    remix: /\bremix\b|\bmix\b/i.test(title),
+    instrumental: /\binstrumental\b|\bkaraoke\b/i.test(title),
+    remaster: /\bremaster(?:ed)?\b/i.test(title)
+  };
+}
 function matchScore(record: LrclibRecord, title: string, artist: string, album: string, duration: number): number {
   const expectedTitle = normalize(cleanTitle(title));
   const candidateTitle = normalize(cleanTitle(record.trackName || record.name || ''));
   if (!expectedTitle || !candidateTitle) return -Infinity;
   // Do not silently substitute a similarly named but different song.
   if (candidateTitle !== expectedTitle) return -Infinity;
+  const requestedVersion = recordingVersions(title);
+  const foundVersion = recordingVersions(record.trackName || '');
+  // A live, remix, acoustic or instrumental recording is not interchangeable
+  // with the original even if the normalized title and artist are identical.
+  for (const version of ['live', 'acoustic', 'remix', 'instrumental'] as const) {
+    if (requestedVersion[version] !== foundVersion[version]) return -Infinity;
+  }
+  const remasterPenalty = requestedVersion.remaster !== foundVersion.remaster ? -10 : 0;
   const expectedArtist = normalize(mainArtist(artist));
   const actualArtist = normalize(mainArtist(record.artistName));
   if (expectedArtist && (!actualArtist || !(actualArtist.includes(expectedArtist) || expectedArtist.includes(actualArtist)))) return -Infinity;
@@ -87,7 +109,7 @@ function matchScore(record: LrclibRecord, title: string, artist: string, album: 
   if (hasDuration && delta > 25) return -Infinity;
   const albumBonus = album && record.albumName && normalize(album) === normalize(record.albumName) ? 12 : 0;
   const durationScore = !hasDuration ? 0 : delta <= 2 ? 42 : delta <= 8 ? 18 : delta <= 15 ? 0 : -20;
-  return 100 + albumBonus + durationScore + (record.syncedLyrics ? 60 : 0) + (record.plainLyrics ? 5 : 0);
+  return 100 + remasterPenalty + albumBonus + durationScore + (record.syncedLyrics ? 60 : 0) + (record.plainLyrics ? 5 : 0);
 }
 
 function asLyrics(record: LrclibRecord, title: string, artist: string, album: string, duration: number): LyricsData | null {
@@ -127,7 +149,8 @@ function asLyrics(record: LrclibRecord, title: string, artist: string, album: st
  * Spotify supplies only track metadata/playback; lyrics come from LRCLIB.
  */
 async function lookupFresh(
-  trackName: string, artistName: string, albumName: string, duration: number
+  trackName: string, artistName: string, albumName: string, duration: number,
+  signal?: AbortSignal
 ): Promise<LyricsLookupResult> {
   const title = cleanTitle(trackName);
   const artist = mainArtist(artistName);
@@ -157,15 +180,16 @@ async function lookupFresh(
   const candidates = new Map<number, LrclibRecord>();
   let networkFailed = false, serviceFailed = false, instrumentalFound = false;
   for (let i = 0; i < distinctPaths.length; i++) {
+    if (signal?.aborted) throw new DOMException('Lyrics lookup aborted', 'AbortError');
     if (i > 0) await delay(275);
-    const response = await api(distinctPaths[i]);
+    const response = await api(distinctPaths[i], signal);
     if (response.status === 'rate-limited') return { lyrics: null, issue: 'rate-limited', retryAfterSeconds: response.retryAfterSeconds };
     if (response.status === 'network') { networkFailed = true; break; }
     if (response.status === 'service-error') { serviceFailed = true; continue; }
     if (response.status !== 'ok') continue;
     const records = Array.isArray(response.data) ? response.data : [response.data];
     for (const item of records) {
-      if (!validRecord(item) || !Number.isFinite(matchScore(item, title, artist, albumName, duration))) continue;
+      if (!validRecord(item) || !Number.isFinite(matchScore(item, trackName, artistName, albumName, duration))) continue;
       if (item.instrumental && !item.plainLyrics && !item.syncedLyrics) instrumentalFound = true;
       else candidates.set(item.id, item);
     }
@@ -175,9 +199,10 @@ async function lookupFresh(
   }
 
   const ranked = [...candidates.values()].sort(
-    (a, b) => matchScore(b, title, artist, albumName, duration) - matchScore(a, title, artist, albumName, duration)
+    (a, b) => matchScore(b, trackName, artistName, albumName, duration) - matchScore(a, trackName, artistName, albumName, duration)
   );
   for (const record of ranked) {
+    if (signal?.aborted) throw new DOMException('Lyrics lookup aborted', 'AbortError');
     const lyrics = asLyrics(record, trackName, artistName, albumName, duration);
     if (lyrics) {
       if (generation === (lookupGenerations.get(key) || 0)) cacheLyrics(key, lyrics);
@@ -202,12 +227,12 @@ export function lookupLyricsFromLRCLIB(
     lookupGenerations.set(key, (lookupGenerations.get(key) || 0) + 1);
     removeCachedLyrics(key);
     pendingLookups.delete(key);
-  } else {
+  } else if (!options.signal) {
     const pending = pendingLookups.get(key);
     if (pending) return pending;
   }
-  const work = lookupFresh(trackName, artistName, albumName, duration);
-  pendingLookups.set(key, work);
+  const work = lookupFresh(trackName, artistName, albumName, duration, options.signal);
+  if (!options.signal) pendingLookups.set(key, work);
   void work.then(
     () => { if (pendingLookups.get(key) === work) pendingLookups.delete(key); },
     () => { if (pendingLookups.get(key) === work) pendingLookups.delete(key); }
@@ -222,10 +247,27 @@ export async function fetchLyricsFromLRCLIB(
   return (await lookupLyricsFromLRCLIB(trackName, artistName, albumName, duration)).lyrics;
 }
 
-export async function searchLRCLIB(query: string): Promise<LrclibRecord[]> {
+export async function searchLRCLIB(query: string, signal?: AbortSignal): Promise<LrclibRecord[]> {
   if (!query.trim()) return [];
-  const response = await api('/api/search?' + new URLSearchParams({ q: query.trim() }));
+  const response = await api('/api/search?' + new URLSearchParams({ q: query.trim() }), signal);
   return response.status === 'ok' && Array.isArray(response.data)
     ? response.data.filter(validRecord)
     : [];
+}
+
+
+/** Fetch an explicitly selected LRCLIB record; never guess an ID or release. */
+export async function fetchLRCLIBLyricsById(
+  id: number, trackName: string, artistName: string, albumName = '', duration = 0,
+  signal?: AbortSignal
+): Promise<LyricsLookupResult> {
+  if (!Number.isSafeInteger(id) || id < 1) return { lyrics: null, issue: 'not-found' };
+  const response = await api('/api/get/' + id, signal);
+  if (response.status !== 'ok') return {
+    lyrics: null, issue: response.status, retryAfterSeconds: response.retryAfterSeconds
+  };
+  if (!validRecord(response.data)) return { lyrics: null, issue: 'not-found' };
+  const record = response.data;
+  const lyrics = asLyrics(record, trackName, artistName, albumName, duration);
+  return { lyrics, issue: lyrics ? undefined : record.instrumental ? 'instrumental' : 'not-found' };
 }

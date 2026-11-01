@@ -1,5 +1,11 @@
 # Lyric ✦ Open-Source Ambient Rim Lighting & Kinetic Synced Lyrics
 
+> **Fork development note (2026-11-01):** This repository is adding an optional browser Spotify companion that follows an existing Spotify player without streaming music. Read [Browser Spotify setup](docs/WEB_SPOTIFY_SETUP.md) and [Repository audit and checklist](docs/REPOSITORY_AUDIT.md). The original web demo, desktop app and Android App Remote remain intact. Browser Spotify features are on a draft branch, **not deployed to GitHub Pages**. Links below referring to RithvikVatti are upstream project links, not evidence that this fork's changes are live.
+
+**New optional web companion (on this development branch):** Open the existing Lyric web app and select **Follow Spotify**, or append `?mode=spotify` to the root URL. Register the exact browser redirect URI shown in the Connect screen in the Spotify Dashboard; it differs from Android's `lyric://spotify-callback`. Playback controls are optional; LRCLIB supplies lyrics independently of Spotify.
+
+
+
 **Android port:** See [Android installation, permissions, and build instructions](docs/ANDROID.md). Version 1.1 adds measured beat-reactive edges, saved calibration, a local queue, offline lyrics, focus mode, and optional official Spotify Android SDK connectivity in Local without notification access. Generic media-session sync remains in Connected.
 
 <div align="center">

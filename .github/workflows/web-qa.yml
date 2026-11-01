@@ -1,0 +1,52 @@
+name: Web Spotify companion QA
+
+on:
+  push:
+    branches:
+      - feat/web-spotify-pkce-lyrics
+  pull_request:
+    branches:
+      - fix/refresh-lrclib-lyrics
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  web-qa:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install dependencies
+        run: npm ci --ignore-scripts
+      - name: TypeScript and Vite production build
+        run: npm run build
+      - name: Spotify PKCE and Web API playback regression tests
+        run: |
+          node tests/web-spotify-auth.cjs
+          node tests/web-spotify-playback.cjs
+      - name: Lyrics cache, clock and desktop security regressions
+        run: |
+          node tests/lrclib-refresh.cjs
+          node tests/lrclib-version-matching.cjs
+          node tests/sync-audio.cjs
+          node tests/desktop-bridge-security.cjs
+      - name: Install Playwright Chromium
+        run: npx playwright install --with-deps chromium
+      - name: Browser Spotify companion test (mock services only)
+        timeout-minutes: 3
+        run: |
+          npm run dev -- --host 127.0.0.1 > /tmp/lyric-web-vite.log 2>&1 &
+          for attempt in $(seq 1 25); do
+            curl -sf http://127.0.0.1:5173/ >/dev/null && break
+            sleep 1
+          done
+          timeout 100s node tests/web-spotify-ui.cjs
+          timeout 100s node tests/web-spotify-stale-lyrics.cjs
