@@ -77,12 +77,29 @@ function validRecord(value: unknown): value is LrclibRecord {
     && typeof (value as LrclibRecord).artistName === 'string';
 }
 
+function recordingVersions(title: string) {
+  return {
+    live: /(?:\blive\b|\bunplugged\b)/i.test(title),
+    acoustic: /\bacoustic\b/i.test(title),
+    remix: /\bremix\b|\bmix\b/i.test(title),
+    instrumental: /\binstrumental\b|\bkaraoke\b/i.test(title),
+    remaster: /\bremaster(?:ed)?\b/i.test(title)
+  };
+}
 function matchScore(record: LrclibRecord, title: string, artist: string, album: string, duration: number): number {
   const expectedTitle = normalize(cleanTitle(title));
   const candidateTitle = normalize(cleanTitle(record.trackName || record.name || ''));
   if (!expectedTitle || !candidateTitle) return -Infinity;
   // Do not silently substitute a similarly named but different song.
   if (candidateTitle !== expectedTitle) return -Infinity;
+  const requestedVersion = recordingVersions(title);
+  const foundVersion = recordingVersions(record.trackName || '');
+  // A live, remix, acoustic or instrumental recording is not interchangeable
+  // with the original even if the normalized title and artist are identical.
+  for (const version of ['live', 'acoustic', 'remix', 'instrumental'] as const) {
+    if (requestedVersion[version] !== foundVersion[version]) return -Infinity;
+  }
+  const remasterPenalty = requestedVersion.remaster !== foundVersion.remaster ? -10 : 0;
   const expectedArtist = normalize(mainArtist(artist));
   const actualArtist = normalize(mainArtist(record.artistName));
   if (expectedArtist && (!actualArtist || !(actualArtist.includes(expectedArtist) || expectedArtist.includes(actualArtist)))) return -Infinity;
@@ -92,7 +109,7 @@ function matchScore(record: LrclibRecord, title: string, artist: string, album: 
   if (hasDuration && delta > 25) return -Infinity;
   const albumBonus = album && record.albumName && normalize(album) === normalize(record.albumName) ? 12 : 0;
   const durationScore = !hasDuration ? 0 : delta <= 2 ? 42 : delta <= 8 ? 18 : delta <= 15 ? 0 : -20;
-  return 100 + albumBonus + durationScore + (record.syncedLyrics ? 60 : 0) + (record.plainLyrics ? 5 : 0);
+  return 100 + remasterPenalty + albumBonus + durationScore + (record.syncedLyrics ? 60 : 0) + (record.plainLyrics ? 5 : 0);
 }
 
 function asLyrics(record: LrclibRecord, title: string, artist: string, album: string, duration: number): LyricsData | null {
