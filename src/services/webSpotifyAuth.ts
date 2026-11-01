@@ -8,7 +8,8 @@ const SAVED_CLIENT = APP_PREFIX + 'clientId';
 const PERSISTENT_SESSION = APP_PREFIX + 'remembered';
 const TEMP_SESSION = APP_PREFIX + 'session';
 const PENDING_LOGIN = APP_PREFIX + 'pkce';
-const SCOPE = 'user-read-playback-state';
+const READ_SCOPE = 'user-read-playback-state';
+const CONTROL_SCOPE = 'user-modify-playback-state';
 export type SpotifyAuthPhase = 'disconnected' | 'connected' | 'expired';
 interface TokenSession {
   clientId: string;
@@ -16,6 +17,7 @@ interface TokenSession {
   accessToken?: string;
   expiresAt: number;
   remember: boolean;
+  allowControls?: boolean;
 }
 interface PendingLogin {
   state: string;
@@ -24,6 +26,7 @@ interface PendingLogin {
   redirectUri: string;
   createdAt: number;
   remember: boolean;
+  allowControls?: boolean;
 }
 let current: TokenSession | null = null;
 let refreshFlight: Promise<string> | null = null;
@@ -73,6 +76,9 @@ export function savedSpotifyClientId(): string {
 export function hasRememberedSpotifySession(): boolean {
   return !!load();
 }
+export function spotifyBrowserControlsAuthorized(): boolean {
+  return !!load()?.allowControls;
+}
 /**
  * GitHub Pages serves this app at the repository root, e.g. /lyric/.
  * The exact root URL (trailing slash) must be registered in Spotify Dashboard.
@@ -83,13 +89,13 @@ export function webSpotifyRedirectUri(): string {
   if (!path.endsWith('/')) path = path.slice(0, path.lastIndexOf('/') + 1);
   return window.location.origin + path;
 }
-export async function beginSpotifyBrowserLogin(clientId: string, remember: boolean) {
+export async function beginSpotifyBrowserLogin(clientId: string, remember: boolean, allowControls = false) {
   if (!/^[a-f0-9]{32}$/i.test(clientId)) throw new Error('Enter a valid 32-character Spotify Client ID.');
   if (!window.isSecureContext || !crypto?.subtle) throw new Error('Spotify sign-in requires HTTPS or localhost.');
   const verifier = randomBase64Url(64);
   const state = randomBase64Url(32);
   const redirectUri = webSpotifyRedirectUri();
-  const pending: PendingLogin = { state, verifier, clientId, redirectUri, createdAt: now(), remember };
+  const pending: PendingLogin = { state, verifier, clientId, redirectUri, createdAt: now(), remember, allowControls };
   try {
     sessionStorage.setItem(PENDING_LOGIN, JSON.stringify(pending));
     localStorage.setItem(SAVED_CLIENT, clientId);
@@ -97,7 +103,7 @@ export async function beginSpotifyBrowserLogin(clientId: string, remember: boole
   const query = new URLSearchParams({
     response_type: 'code',
     client_id: clientId,
-    scope: SCOPE,
+    scope: allowControls ? READ_SCOPE + ' ' + CONTROL_SCOPE : READ_SCOPE,
     redirect_uri: redirectUri,
     state,
     code_challenge_method: 'S256',
@@ -165,7 +171,7 @@ export function finishSpotifyBrowserCallback(): Promise<boolean> {
     if (epoch !== requestEpoch) return false;
     if (!answer.refresh_token) throw new Error('Spotify did not issue a refresh token. Connect again.');
     current = {
-      clientId: pending.clientId, remember: pending.remember,
+      clientId: pending.clientId, remember: pending.remember, allowControls: !!pending.allowControls,
       refreshToken: answer.refresh_token,
       accessToken: answer.access_token,
       expiresAt: now() + Math.max(1, answer.expires_in || 3600) * 1000
