@@ -30,10 +30,11 @@ jobs:
         run: npm run build
       - name: Spotify PKCE authorization regression tests
         run: node tests/web-spotify-auth.cjs
-      - name: Lyrics cache and clock regression tests
+      - name: Lyrics cache, clock and desktop security regressions
         run: |
           node tests/lrclib-refresh.cjs
           node tests/sync-audio.cjs
+          node tests/desktop-bridge-security.cjs
       - name: Install Playwright Chromium
         run: npx playwright install --with-deps chromium
       - name: Browser Spotify companion test (mock services only)
