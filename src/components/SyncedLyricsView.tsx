@@ -27,23 +27,16 @@ const SyncedLyricsViewComponent: React.FC<SyncedLyricsViewProps> = ({
 }) => {
   // Find active line index
   const activeIndex = useMemo(() => {
-    if (!lyrics || !lyrics.lines || lyrics.lines.length === 0) return -1;
-    const lines = lyrics.lines;
-
-    for (let i = 0; i < lines.length; i++) {
-      const line = lines[i];
-      const nextLine = lines[i + 1];
-
-      if (currentTime >= line.time) {
-        if (!nextLine || currentTime < nextLine.time) {
-          return i;
-        }
-      }
+    if (!lyrics?.lines.length) return -1;
+    let left = 0, right = lyrics.lines.length - 1, index = -1;
+    while (left <= right) {
+      const mid = (left + right) >>> 1;
+      if (currentTime >= lyrics.lines[mid].time) { index = mid; left = mid + 1; }
+      else right = mid - 1;
     }
-
-    if (currentTime < lines[0].time) return -1;
-    return lines.length - 1;
+    return index;
   }, [lyrics, currentTime]);
+  const genuineWordSync = !!lyrics?.hasWordSync;
 
   const activeLine: LyricLine | null = useMemo(() => {
     if (!lyrics || activeIndex === -1 || !lyrics.lines[activeIndex]) return null;
@@ -52,7 +45,7 @@ const SyncedLyricsViewComponent: React.FC<SyncedLyricsViewProps> = ({
 
   // Find active word for Single-Word and Smooth-Captions modes
   const { activeWord, activeWordIndex, upcomingWords } = useMemo(() => {
-    if (!activeLine || !activeLine.words || activeLine.words.length === 0) {
+    if (!genuineWordSync || !activeLine || !activeLine.words || activeLine.words.length === 0) {
       return { activeWord: null, activeWordIndex: -1, upcomingWords: [] };
     }
 
@@ -82,7 +75,7 @@ const SyncedLyricsViewComponent: React.FC<SyncedLyricsViewProps> = ({
     const upcoming = idx >= 0 ? words.slice(idx + 1, idx + 4).map(uw => uw.word) : [];
 
     return { activeWord: w, activeWordIndex: idx, upcomingWords: upcoming };
-  }, [activeLine, currentTime]);
+  }, [activeLine, currentTime, genuineWordSync]);
 
   // If no lyrics found
   if (!lyrics || lyrics.lines.length === 0) {
@@ -155,6 +148,11 @@ const SyncedLyricsViewComponent: React.FC<SyncedLyricsViewProps> = ({
               </p>
             </div>
           </div>
+        ) : activeLine && !isInst ? (
+          <div className="flex flex-col items-center justify-center gap-4 max-w-3xl">
+            <p className="text-center text-3xl sm:text-5xl font-black leading-snug text-white">{activeLine.text}</p>
+            <p className="text-xs text-white/40">Line-synchronized · individual word timing not available</p>
+          </div>
         ) : (
           <div className="flex flex-col items-center justify-center space-y-3.5">
             <div className="flex items-center gap-3">
@@ -169,7 +167,7 @@ const SyncedLyricsViewComponent: React.FC<SyncedLyricsViewProps> = ({
               />
             </div>
             <p className="text-xs font-mono uppercase tracking-widest text-white/40">
-              Instrumental Interlude
+              {activeLine ? 'Instrumental Interlude' : 'Waiting for the next lyric'}
             </p>
           </div>
         )}
@@ -186,7 +184,7 @@ const SyncedLyricsViewComponent: React.FC<SyncedLyricsViewProps> = ({
         <div className="space-y-7 max-w-3xl">
           {/* Active Phrase with Bouncy Spring Word Highlights */}
           <div className="text-3xl sm:text-4xl md:text-5xl lg:text-6xl font-black tracking-tight leading-snug flex flex-wrap justify-center gap-x-3.5 gap-y-2.5">
-            {activeLine.words && activeLine.words.length > 0 ? (
+            {genuineWordSync && activeLine.words && activeLine.words.length > 0 ? (
               activeLine.words.map((w, wIdx) => {
                 const isCurrent = currentTime >= w.start && currentTime < w.end;
                 const isPast = currentTime >= w.end;
@@ -251,7 +249,7 @@ function visibleMoment(lyrics: LyricsData | null, seconds: number): string {
     else hi = mid - 1;
   }
   if (index < 0) return 'prelude';
-  const words = lines[index].words || [];
+  const words = lyrics.hasWordSync ? (lines[index].words || []) : [];
   if (!words.length) return String(index);
   let seen = -1;
   let past = 0;
