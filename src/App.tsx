@@ -39,7 +39,12 @@ import {
 
 export const App: React.FC = () => {
   // Playback & Track State
-  const [currentTrack, setCurrentTrack] = useState<Track>(DEMO_TRACKS[0]);
+  const [currentTrack, setCurrentTrack] = useState<Track>(() => {
+    const state = musicLibrary.getSnapshot();
+    const last = state.queue.find(track => track.id === state.currentId);
+    const demo = last && DEMO_TRACKS.find(track => track.id === last.id);
+    return demo || (last && canPlaySavedTrack(last) ? playbackTrack(last) : DEMO_TRACKS[0]);
+  });
   const [isPlaying, setIsPlaying] = useState<boolean>(false);
   const [currentTime, setCurrentTime] = useState<number>(0);
   const [duration, setDuration] = useState<number>(DEMO_TRACKS[0].duration);
@@ -80,6 +85,9 @@ export const App: React.FC = () => {
   const lockscreenBarRef = useRef<HTMLDivElement>(null);
   const playerCardRef = useRef<HTMLDivElement>(null);
   const endedRef = useRef<() => void>(() => {});
+  const sourceRef = useRef(currentTrack.source);
+  sourceRef.current = currentTrack.source;
+  const playOnTrackChange = useRef(false);
 
   // Attach ybouane/liquidglass WebGL shader to glass HTML elements (darker, translucent glass)
   useLiquidGlass(rootContainerRef, [lockscreenBarRef, playerCardRef], {
@@ -115,7 +123,7 @@ export const App: React.FC = () => {
     };
 
     const handleTimeUpdate = () => {
-      if (!currentTrack.source.startsWith('macos-')) {
+      if (!sourceRef.current.startsWith('macos-')) {
         globalClock.sync(audio.currentTime, !audio.paused, 0);
       }
     };
@@ -138,7 +146,15 @@ export const App: React.FC = () => {
     };
   }, []);
 
-  useEffect(() => { musicLibrary.queueTrack(DEMO_TRACKS[0]); }, []);
+  useEffect(() => {
+    try {
+      // Seed demo previews once per browser, not after the user clears the queue.
+      if (localStorage.getItem('lyric.music-library.seeded.v1') !== '1') {
+        if (!musicLibrary.getSnapshot().queue.length) DEMO_TRACKS.forEach(track => musicLibrary.queueTrack(track));
+        localStorage.setItem('lyric.music-library.seeded.v1', '1');
+      }
+    } catch { /* Browser storage is optional. */ }
+  }, []);
 
   useEffect(() => {
     let frame = 0, lastPosition = 0, lastEnergy = 0;
@@ -189,8 +205,15 @@ export const App: React.FC = () => {
       if (audioRef.current.src !== currentTrack.audioUrl) {
         audioRef.current.src = currentTrack.audioUrl;
         audioRef.current.load();
-        if (isPlaying) {
-          audioRef.current.play().catch(e => console.warn('Autoplay prevented:', e));
+        if (playOnTrackChange.current) {
+          void audioRef.current.play().then(() => {
+            setIsPlaying(true);
+          }).catch(e => {
+            console.warn('Autoplay prevented:', e);
+            setIsPlaying(false);
+            setSyncFeedback('Tap Play to start audio');
+          });
+          playOnTrackChange.current = false;
         }
       }
     }
@@ -303,6 +326,7 @@ export const App: React.FC = () => {
       return;
     }
     musicLibrary.playNow(candidate);
+    playOnTrackChange.current = true;
     setCurrentTrack(candidate);
     setDuration(candidate.duration);
     setCurrentTime(0);
@@ -359,6 +383,7 @@ export const App: React.FC = () => {
 
   const handleSelectSearchedTrack = useCallback((track: Track) => {
     musicLibrary.playNow(track);
+    playOnTrackChange.current = true;
     setCurrentTrack(track);
     setDuration(track.duration);
     globalClock.reset(0, true);
@@ -368,6 +393,7 @@ export const App: React.FC = () => {
   const handleFileUpload = useCallback((file: File) => {
     const localTrack = createTrackFromFile(file);
     musicLibrary.playNow(localTrack);
+    playOnTrackChange.current = true;
     setCurrentTrack(localTrack);
     globalClock.reset(0, true);
     setIsPlaying(true);
