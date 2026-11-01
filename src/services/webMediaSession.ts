@@ -44,7 +44,7 @@ export function setLyricMediaPosition(position: number, duration: number, playin
   try {
     session.setPositionState({
       duration,
-      playbackRate: playing ? 1 : 0,
+      playbackRate: 1,
       position: Math.max(0, Math.min(duration, position))
     });
   } catch { /* Some mobile browsers reject unsupported playbackRate/position updates. */ }
