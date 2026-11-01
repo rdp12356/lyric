@@ -1,5 +1,5 @@
 import { LyricsData } from '../types';
-import { cachedLyrics, cacheLyrics, lyricsKey } from './lyricsCache';
+import { cachedLyrics, cacheLyrics, lyricsKey, removeCachedLyrics } from './lyricsCache';
 import { parseLRC, convertPlainToEstimatedLines } from './lrcParser';
 
 interface LrclibRecord {
@@ -12,6 +12,8 @@ interface LrclibRecord {
   instrumental: boolean;
   plainLyrics?: string | null;
   syncedLyrics?: string | null;
+  hasWordSync?: boolean;
+  lyricsfile?: string | null;
 }
 
 export type LyricsLookupIssue = 'not-found' | 'instrumental' | 'network' | 'rate-limited' | 'service-error';
@@ -20,9 +22,12 @@ export interface LyricsLookupResult {
   issue?: LyricsLookupIssue;
   retryAfterSeconds?: number;
 }
+export interface LyricsLookupOptions { refresh?: boolean }
 
-const lyricsCache = new Map<string, LyricsData>();
-const CLIENT_ID = 'Lyric/1.5.0 (+https://github.com/rdp12356/lyric)';
+
+const pendingLookups = new Map<string, Promise<LyricsLookupResult>>();
+const lookupGenerations = new Map<string, number>();
+const CLIENT_ID = 'Lyric/1.6.0 (+https://github.com/rdp12356/lyric)';
 let rateLimitUntil = 0;
 const normalize = (s: string) => s.normalize('NFKD').replace(/\p{M}/gu, '').toLowerCase().replace(/[^\p{L}\p{N}]/gu, '');
 const cleanTitle = (s: string) => s.trim()
@@ -74,12 +79,15 @@ function matchScore(record: LrclibRecord, title: string, artist: string, album: 
   // Do not silently substitute a similarly named but different song.
   if (candidateTitle !== expectedTitle) return -Infinity;
   const expectedArtist = normalize(mainArtist(artist));
-  const actualArtist = normalize(record.artistName);
+  const actualArtist = normalize(mainArtist(record.artistName));
   if (expectedArtist && (!actualArtist || !(actualArtist.includes(expectedArtist) || expectedArtist.includes(actualArtist)))) return -Infinity;
-  const delta = duration > 0 && record.duration > 0 ? Math.abs(record.duration - duration) : 0;
+  const hasDuration = Number.isFinite(duration) && duration > 0 && Number.isFinite(record.duration) && record.duration > 0;
+  const delta = hasDuration ? Math.abs(record.duration - duration) : 0;
+  // A version far from Spotify's runtime is unlikely to stay synchronized.
+  if (hasDuration && delta > 25) return -Infinity;
   const albumBonus = album && record.albumName && normalize(album) === normalize(record.albumName) ? 12 : 0;
-  const durationScore = duration > 0 && record.duration > 0 ? (delta <= 2 ? 18 : delta <= 15 ? 7 : delta > 35 ? -25 : -5) : 0;
-  return 100 + albumBonus + durationScore + (record.syncedLyrics ? 45 : 0) + (record.plainLyrics ? 5 : 0);
+  const durationScore = !hasDuration ? 0 : delta <= 2 ? 42 : delta <= 8 ? 18 : delta <= 15 ? 0 : -20;
+  return 100 + albumBonus + durationScore + (record.syncedLyrics ? 60 : 0) + (record.plainLyrics ? 5 : 0);
 }
 
 function asLyrics(record: LrclibRecord, title: string, artist: string, album: string, duration: number): LyricsData | null {
@@ -118,35 +126,39 @@ function asLyrics(record: LrclibRecord, title: string, artist: string, album: st
  * Return lyrics and an explicit reason when none are available.
  * Spotify supplies only track metadata/playback; lyrics come from LRCLIB.
  */
-export async function lookupLyricsFromLRCLIB(
-  trackName: string, artistName: string, albumName = '', duration = 0
+async function lookupFresh(
+  trackName: string, artistName: string, albumName: string, duration: number
 ): Promise<LyricsLookupResult> {
   const title = cleanTitle(trackName);
   const artist = mainArtist(artistName);
   if (!title || !artist) return { lyrics: null, issue: 'not-found' };
   const key = lyricsKey(title, artist, albumName, duration);
-  const stored = cachedLyrics(key) || lyricsCache.get(key);
+  const generation = lookupGenerations.get(key) || 0;
+  const stored = cachedLyrics(key);
   if (stored) return { lyrics: stored };
 
-  const searchParams = new URLSearchParams({ track_name: title, artist_name: artist });
-  const broadParams = new URLSearchParams({ q: title + ' ' + artist });
-  // LRCLIB's optional album/duration arguments improve precision, but
-  // alternate Spotify releases may need the relaxed title/artist lookup.
+  const rawTitle = trackName.trim();
+  const rawArtist = artistName.trim();
   const paths: string[] = [];
+  // The full Spotify signature finds the exact recording when it exists.
   if (albumName.trim() && duration > 0 && duration <= 3600) {
-    const exactParams = new URLSearchParams({
-      track_name: title, artist_name: artist, album_name: albumName,
+    paths.push('/api/get?' + new URLSearchParams({
+      track_name: rawTitle, artist_name: rawArtist, album_name: albumName,
       duration: String(Math.round(duration))
-    });
-    paths.push('/api/get?' + exactParams);
+    }));
   }
-  paths.push('/api/get?' + searchParams, '/api/search?' + searchParams, '/api/search?' + broadParams);
+  // LRCLIB also supports title/artist alone. This handles releases with
+  // different album names, optional collaborator credits, and remaster tags.
+  paths.push('/api/get?' + new URLSearchParams({ track_name: title, artist_name: artist }));
+  paths.push('/api/search?' + new URLSearchParams({ track_name: title, artist_name: artist }));
+  paths.push('/api/search?' + new URLSearchParams({ q: title + ' ' + artist }));
+  const distinctPaths = [...new Set(paths)];
 
   const candidates = new Map<number, LrclibRecord>();
   let networkFailed = false, serviceFailed = false, instrumentalFound = false;
-  for (let i = 0; i < paths.length; i++) {
-    if (i > 0) await delay(250);
-    const response = await api(paths[i]);
+  for (let i = 0; i < distinctPaths.length; i++) {
+    if (i > 0) await delay(275);
+    const response = await api(distinctPaths[i]);
     if (response.status === 'rate-limited') return { lyrics: null, issue: 'rate-limited', retryAfterSeconds: response.retryAfterSeconds };
     if (response.status === 'network') { networkFailed = true; break; }
     if (response.status === 'service-error') { serviceFailed = true; continue; }
@@ -157,7 +169,9 @@ export async function lookupLyricsFromLRCLIB(
       if (item.instrumental && !item.plainLyrics && !item.syncedLyrics) instrumentalFound = true;
       else candidates.set(item.id, item);
     }
-    if (i <= 1 && [...candidates.values()].some(record => !!record.syncedLyrics)) break;
+    // Stop early only for a genuinely tight synchronized recording match.
+    if ([...candidates.values()].some(record => record.syncedLyrics &&
+        (!duration || (Number.isFinite(record.duration) && Math.abs(record.duration - duration) <= 2)))) break;
   }
 
   const ranked = [...candidates.values()].sort(
@@ -166,14 +180,39 @@ export async function lookupLyricsFromLRCLIB(
   for (const record of ranked) {
     const lyrics = asLyrics(record, trackName, artistName, albumName, duration);
     if (lyrics) {
-      lyricsCache.set(key, lyrics);
-      cacheLyrics(key, lyrics);
+      if (generation === (lookupGenerations.get(key) || 0)) cacheLyrics(key, lyrics);
       return { lyrics };
     }
   }
   if (networkFailed) return { lyrics: null, issue: 'network' };
   if (serviceFailed) return { lyrics: null, issue: 'service-error' };
   return { lyrics: null, issue: instrumentalFound ? 'instrumental' : 'not-found' };
+}
+
+/**
+ * Force-refresh bypasses and invalidates cached lyrics. Parallel automatic
+ * lookups for the same track share one network request to protect LRCLIB.
+ */
+export function lookupLyricsFromLRCLIB(
+  trackName: string, artistName: string, albumName = '', duration = 0,
+  options: LyricsLookupOptions = {}
+): Promise<LyricsLookupResult> {
+  const key = lyricsKey(cleanTitle(trackName), mainArtist(artistName), albumName, duration);
+  if (options.refresh) {
+    lookupGenerations.set(key, (lookupGenerations.get(key) || 0) + 1);
+    removeCachedLyrics(key);
+    pendingLookups.delete(key);
+  } else {
+    const pending = pendingLookups.get(key);
+    if (pending) return pending;
+  }
+  const work = lookupFresh(trackName, artistName, albumName, duration);
+  pendingLookups.set(key, work);
+  void work.then(
+    () => { if (pendingLookups.get(key) === work) pendingLookups.delete(key); },
+    () => { if (pendingLookups.get(key) === work) pendingLookups.delete(key); }
+  );
+  return work;
 }
 
 /** Compatibility API for the web / desktop player. */
