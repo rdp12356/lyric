@@ -27,7 +27,7 @@ export interface LyricsLookupOptions { refresh?: boolean }
 
 const pendingLookups = new Map<string, Promise<LyricsLookupResult>>();
 const lookupGenerations = new Map<string, number>();
-const CLIENT_ID = 'Lyric/1.6.0 (+https://github.com/rdp12356/lyric)';
+const CLIENT_ID = 'Lyric/1.5.1 (+https://github.com/rdp12356/lyric)';
 let rateLimitUntil = 0;
 const normalize = (s: string) => s.normalize('NFKD').replace(/\p{M}/gu, '').toLowerCase().replace(/[^\p{L}\p{N}]/gu, '');
 const cleanTitle = (s: string) => s.trim()
