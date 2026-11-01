@@ -1,0 +1,50 @@
+name: Lyric music library and player QA
+
+on:
+  push:
+    branches: ['feat/library-queue-backup-foundation']
+  pull_request:
+    branches: ['feat/web-spotify-pkce-lyrics']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  library:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install dependencies
+        run: npm ci --ignore-scripts
+      - name: Typecheck and production build
+        run: npm run build
+      - name: Library / queue / backup tests
+        run: node tests/library-model.cjs
+      - name: Existing Spotify and lyrics regressions
+        run: |
+          node tests/web-spotify-auth.cjs
+          node tests/web-spotify-playback.cjs
+          node tests/lrclib-refresh.cjs
+          node tests/lrclib-version-matching.cjs
+          node tests/sync-audio.cjs
+          node tests/desktop-bridge-security.cjs
+      - name: Browser engine
+        run: npx playwright install --with-deps chromium
+      - name: Web Spotify and library browser checks (mock services)
+        timeout-minutes: 4
+        run: |
+          npm run dev -- --host 127.0.0.1 >/tmp/lyric-vite.log 2>&1 &
+          for attempt in $(seq 1 25); do
+            curl -sf http://127.0.0.1:5173/ >/dev/null && break
+            sleep 1
+          done
+          timeout 90s node tests/library-ui.cjs
+          timeout 90s node tests/web-spotify-ui.cjs
