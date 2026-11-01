@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Music2, RefreshCw, Search, LogOut, Check, AlertCircle, ArrowLeft, Download, ExternalLink, Settings2 } from 'lucide-react';
+import { Music2, RefreshCw, Search, LogOut, Check, AlertCircle, ArrowLeft, Download, ExternalLink, Settings2, Library, Heart } from 'lucide-react';
 import {
   beginSpotifyBrowserLogin, disconnectSpotifyBrowser, finishSpotifyBrowserCallback,
   getSpotifyBrowserAccessToken, hasRememberedSpotifySession,
@@ -13,7 +13,9 @@ import { cachedLyrics, cacheLyrics, lyricsKey, removeCachedLyrics } from '../ser
 import { parseLRC } from '../services/lrcParser';
 import { SyncClock } from '../services/syncClock';
 import { SpotifyLyricsPanel } from './SpotifyLyricsPanel';
-import type { LyricsData } from '../types';
+import { MusicLibraryDrawer } from './MusicLibraryDrawer';
+import { musicLibrary, useMusicLibrary } from '../services/musicLibrary';
+import type { LyricsData, Track } from '../types';
 
 const OFFSET_STORE = 'lyric.web.song.offsets.v1';
 const FONT_STORE = 'lyric.web.font.size.v1';
@@ -41,6 +43,16 @@ function playerTrack(value: SpotifyWebPlayback): LyricsTrack {
     name: value.title, artist: value.artist, album: value.album, duration: value.duration
   };
 }
+function SpotifyFavorite({ song }: { song: Track }) {
+  const library = useMusicLibrary();
+  const favorite = library.favorites.some(item => item.id === song.id);
+  return <button aria-label={favorite ? 'Remove Spotify favorite' : 'Save Spotify favorite'} className={BUTTON}
+    onClick={() => musicLibrary.toggleFavorite(song)}>
+    <Heart size={15} fill={favorite ? 'currentColor' : 'none'} className="inline" />
+    <span className="hidden sm:inline"> {favorite ? 'Saved' : 'Favorite'}</span>
+  </button>;
+}
+
 export default function WebSpotifyCompanion() {
   const [phase, setPhase] = useState<Phase>('checking');
   const [clientId, setClientId] = useState(savedSpotifyClientId);
@@ -62,6 +74,7 @@ export default function WebSpotifyCompanion() {
     try { return Math.min(42, Math.max(18, Number(localStorage.getItem(FONT_STORE)) || 27)); } catch { return 27; }
   });
   const [settings, setSettings] = useState(false);
+  const [libraryOpen, setLibraryOpen] = useState(false);
   const [autoFollow, setAutoFollow] = useState(true);
   const [showPlain, setShowPlain] = useState(true);
   const [manualResult, setManualResult] = useState(false);
@@ -76,6 +89,17 @@ export default function WebSpotifyCompanion() {
   const activeCacheKey = track ? lyricsKey(track.name, track.artist, track.album, track.duration) : '';
   const spotifyUrl = trackId && /^[a-zA-Z0-9]{22}$/.test(trackId) ? 'https://open.spotify.com/track/' + trackId : '';
   const artwork = playback?.artwork;
+  const libraryTrack = useMemo<Track | null>(() => playback ? ({
+    id: playback.uri || playback.trackId,
+    title: playback.title,
+    artist: playback.artist,
+    album: playback.album,
+    albumArt: playback.artwork,
+    duration: playback.duration,
+    position: playback.position,
+    isPlaying: playback.playing,
+    source: 'spotify-web'
+  }) : null, [playback?.uri, playback?.trackId, playback?.title, playback?.artist, playback?.album, playback?.artwork, playback?.duration, playback?.playing]);
   const formatTime = (time: number) => {
     const value = Math.max(0, Math.floor(time));
     return Math.floor(value / 60) + ':' + String(value % 60).padStart(2, '0');
@@ -144,6 +168,11 @@ export default function WebSpotifyCompanion() {
         } else {
           const key = next.uri || next.trackId;
           if (key !== lastKey.current) {
+            musicLibrary.rememberTrack({
+              id: next.uri || next.trackId, title: next.title, artist: next.artist,
+              album: next.album, albumArt: next.artwork, duration: next.duration,
+              position: next.position, isPlaying: next.playing, source: 'spotify-web'
+            });
             lyricRequestId.current++; setLyrics(null); setManualResult(false);
             setLyricsError(''); setCandidates([]);
             clock.current.reset(next.position, next.playing);
@@ -345,6 +374,9 @@ export default function WebSpotifyCompanion() {
       </div>
       <div className="flex items-center gap-2">
         <button className={BUTTON} onClick={goBack}><ArrowLeft className="inline h-4 w-4 mr-1" /> Original player</button>
+        <button className={BUTTON} onClick={() => setLibraryOpen(true)} aria-label="Open music library">
+          <Library className="inline h-4 w-4 mr-1" /> Library
+        </button>
         {phase === 'connected' && <button className={BUTTON} onClick={() => setSettings(value => !value)}
           aria-label="Lyrics settings"><Settings2 className="inline h-4 w-4" /></button>}
         {phase === 'connected' && <button className={BUTTON} onClick={disconnect}>
@@ -403,6 +435,7 @@ export default function WebSpotifyCompanion() {
           <div>{playback?.playing ? 'Playing' : playback ? 'Paused' : 'Waiting'}</div>
           <div>{formatTime(seconds)} / {formatTime(playback?.duration || 0)}</div>
         </div>
+        {libraryTrack && <SpotifyFavorite song={libraryTrack} />}
         {allowControls && playback && <button className={BUTTON} onClick={() => void togglePlayback()} aria-label={playback.playing ? 'Pause Spotify' : 'Resume Spotify'}>{playback.playing ? 'Pause' : 'Play'}</button>}
         {spotifyUrl && <a href={spotifyUrl} target="_blank" rel="noopener noreferrer" title="Open song in Spotify"
           className={BUTTON}><ExternalLink size={15} /></a>}
@@ -469,5 +502,8 @@ export default function WebSpotifyCompanion() {
         </div>}
       </footer>
     </>}
+    <MusicLibraryDrawer open={libraryOpen} onClose={() => setLibraryOpen(false)}
+      playing={libraryTrack} allowPlayback={false}
+      onPlayTrack={() => setConnection('Switch to the original Lyric player to play saved previews.')} />
   </div>;
 }
