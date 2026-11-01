@@ -25,18 +25,23 @@ import { SyncedLyricsView } from './components/SyncedLyricsView';
 import { LockscreenPlayerBar } from './components/LockscreenPlayerBar';
 import { ControlsModal } from './components/ControlsModal';
 import { TrackSearchModal } from './components/TrackSearchModal';
+import { LocalLibraryPanel } from './components/LocalLibraryPanel';
+import { libraryStore, useLibrary } from './services/libraryStore';
 import { useLiquidGlass } from './hooks/useLiquidGlass';
 
 import {
   Sun,
   Maximize2,
   Minimize2,
-  Clock
+  Clock,
+  Library
 } from 'lucide-react';
 
 export const App: React.FC = () => {
   // Playback & Track State
-  const [currentTrack, setCurrentTrack] = useState<Track>(DEMO_TRACKS[0]);
+  const [currentTrack, setCurrentTrack] = useState<Track>(() =>
+    libraryStore.getPlayable(libraryStore.getSnapshot().currentId || '') || DEMO_TRACKS[0]
+  );
   const [isPlaying, setIsPlaying] = useState<boolean>(false);
   const [currentTime, setCurrentTime] = useState<number>(0);
   const [duration, setDuration] = useState<number>(DEMO_TRACKS[0].duration);
@@ -67,11 +72,18 @@ export const App: React.FC = () => {
   const [syncOffset, setSyncOffset] = useState<number>(0);
   const [isSettingsOpen, setIsSettingsOpen] = useState<boolean>(false);
   const [isSearchOpen, setIsSearchOpen] = useState<boolean>(false);
+  const [isLibraryOpen, setIsLibraryOpen] = useState<boolean>(false);
+  const library = useLibrary();
+  const previousVolume = useRef(0.8);
   const [isFullscreen, setIsFullscreen] = useState<boolean>(false);
   const [isMacBridgeOnline, setIsMacBridgeOnline] = useState<boolean>(false);
   const [isMicActive, setIsMicActive] = useState<boolean>(false);
 
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  const currentTrackRef = useRef(currentTrack);
+  const nextRef = useRef<(automatic?: boolean) => void>(() => {});
+  const importedAudioUrls = useRef(new Set<string>());
+  currentTrackRef.current = currentTrack;
   const rootContainerRef = useRef<HTMLDivElement>(null);
   const lockscreenBarRef = useRef<HTMLDivElement>(null);
   const playerCardRef = useRef<HTMLDivElement>(null);
@@ -97,41 +109,71 @@ export const App: React.FC = () => {
     ? extractedPalette
     : PRESET_PALETTES[rimConfig.palettePreset] || extractedPalette;
 
-  // 1. Initialize HTML5 Audio Element & Visualizer Engine
+  // 1. One stable HTMLAudioElement for this view. Track/artwork updates must not
+  // tear down the analyser or abandon audio event handlers.
   useEffect(() => {
     const audio = new Audio();
     audio.crossOrigin = 'anonymous';
+    audio.preload = 'metadata';
     audioRef.current = audio;
-
-    const handleLoadedMetadata = () => {
-      if (audio.duration && !isNaN(audio.duration)) {
-        setDuration(audio.duration);
-      }
+    audio.volume = libraryStore.getSnapshot().volume;
+    const metadata = () => {
+      if (Number.isFinite(audio.duration) && audio.duration > 0) setDuration(audio.duration);
     };
-
-    const handleTimeUpdate = () => {
-      if (!currentTrack.source.startsWith('macos-')) {
+    const timeupdate = () => {
+      if (!currentTrackRef.current.source.startsWith('macos-')) {
         globalClock.sync(audio.currentTime, !audio.paused, 0);
+        setIsPlaying(!audio.paused && !audio.ended);
       }
     };
-
-    const handleEnded = () => {
-      handleNext();
+    const ended = () => nextRef.current(true);
+    const failure = () => {
+      setIsPlaying(false);
+      setSyncFeedback('Audio unavailable — select another authorized source');
     };
-
-    audio.addEventListener('loadedmetadata', handleLoadedMetadata);
-    audio.addEventListener('timeupdate', handleTimeUpdate);
-    audio.addEventListener('ended', handleEnded);
-
+    audio.addEventListener('loadedmetadata', metadata);
+    audio.addEventListener('timeupdate', timeupdate);
+    audio.addEventListener('ended', ended);
+    audio.addEventListener('error', failure);
     visualizerEngine.init(audio);
-
     return () => {
-      audio.removeEventListener('loadedmetadata', handleLoadedMetadata);
-      audio.removeEventListener('timeupdate', handleTimeUpdate);
-      audio.removeEventListener('ended', handleEnded);
+      audio.removeEventListener('loadedmetadata', metadata);
+      audio.removeEventListener('timeupdate', timeupdate);
+      audio.removeEventListener('ended', ended);
+      audio.removeEventListener('error', failure);
       audio.pause();
+      audio.removeAttribute('src');
+      audio.load();
+      if (audioRef.current === audio) audioRef.current = null;
+      importedAudioUrls.current.forEach(url => URL.revokeObjectURL(url));
+      importedAudioUrls.current.clear();
     };
-  }, [currentTrack]);
+  }, []);
+
+  useEffect(() => {
+    const audio = audioRef.current;
+    if (audio) audio.volume = library.volume;
+  }, [library.volume]);
+
+  useEffect(() => {
+    const audio = audioRef.current;
+    if (!audio) return;
+    if (currentTrack.source.startsWith('macos-') || !currentTrack.audioUrl) {
+      audio.pause();
+      audio.removeAttribute('src');
+      audio.load();
+      return;
+    }
+    if (audio.src !== currentTrack.audioUrl) {
+      audio.pause();
+      audio.src = currentTrack.audioUrl;
+      audio.load();
+      setDuration(currentTrack.duration);
+    }
+    // Browsers require a user gesture for playback. Never pretend playback
+    // succeeded when the audio preview is blocked or unavailable.
+    if (isPlaying) void audio.play().catch(() => setIsPlaying(false));
+  }, [currentTrack.id, currentTrack.audioUrl, currentTrack.source]);
 
   // 2. High-Precision 120Hz / 60Hz RequestAnimationFrame Tick Loop
   useEffect(() => {
@@ -139,7 +181,7 @@ export const App: React.FC = () => {
 
     const tick = () => {
       const nowPos = globalClock.now();
-      setCurrentTime(nowPos);
+      setCurrentTime(previous => Math.abs(previous - nowPos) >= 0.03 ? nowPos : previous);
 
       if (isPlaying) {
         const energy = visualizerEngine.getAudioEnergy(nowPos, isPlaying);
@@ -176,15 +218,6 @@ export const App: React.FC = () => {
       }
     });
 
-    if (audioRef.current && currentTrack.audioUrl) {
-      if (audioRef.current.src !== currentTrack.audioUrl) {
-        audioRef.current.src = currentTrack.audioUrl;
-        audioRef.current.load();
-        if (isPlaying) {
-          audioRef.current.play().catch(e => console.warn('Autoplay prevented:', e));
-        }
-      }
-    }
 
     return () => {
       isCancelled = true;
@@ -217,8 +250,14 @@ export const App: React.FC = () => {
               artwork = (await fetchArtworkForTrack(macState.track, macState.artist)) || undefined;
             }
 
+            libraryStore.markNowPlaying({
+              id: 'macos-' + [macSource, macState.track, macState.artist, macState.album].join('|'),
+              title: macState.track, artist: macState.artist, album: macState.album || '',
+              albumArt: artwork || '', duration: macState.duration || 0,
+              position: macState.position || 0, isPlaying: isPlayingState, source: macSource
+            });
             setCurrentTrack({
-              id: `mac-${Date.now()}`,
+              id: 'macos-' + [macSource, macState.track, macState.artist, macState.album].join('|'),
               title: macState.track,
               artist: macState.artist,
               album: macState.album || 'Now Playing',
@@ -256,83 +295,102 @@ export const App: React.FC = () => {
     };
   }, [currentTrack]);
 
-  // Controls
+  // Controls: Spotify/macOS remains an external source; local queue entries
+  // are never promoted to full streaming tracks without an authorized audio URL.
   const handlePlayPause = useCallback(() => {
     visualizerEngine.resume();
-    if (currentTrack.source.startsWith('macos-')) {
-      const targetApp = currentTrack.source === 'macos-spotify' ? 'Spotify' : 'Music';
-      sendMacOSCommand('play-pause', targetApp);
-      setIsPlaying(!isPlaying);
-      globalClock.sync(currentTime, !isPlaying, 0);
+    const selected = currentTrackRef.current;
+    if (selected.source.startsWith('macos-')) {
+      const app = selected.source === 'macos-spotify' ? 'Spotify' : 'Music';
+      void sendMacOSCommand('play-pause', app);
+      setIsPlaying(wasPlaying => !wasPlaying);
       return;
     }
-
-    if (audioRef.current) {
-      if (isPlaying) {
-        audioRef.current.pause();
-        setIsPlaying(false);
-        globalClock.sync(audioRef.current.currentTime, false, 0);
-      } else {
-        audioRef.current.play().then(() => {
-          setIsPlaying(true);
-          globalClock.sync(audioRef.current!.currentTime, true, 0);
-        }).catch(err => {
-          console.warn('Audio play error:', err);
-          setIsPlaying(true);
-          globalClock.sync(currentTime, true, 0);
-        });
-      }
-    }
-  }, [isPlaying, currentTrack, currentTime]);
-
-  const handleNext = useCallback(() => {
-    if (currentTrack.source.startsWith('macos-')) {
-      const targetApp = currentTrack.source === 'macos-spotify' ? 'Spotify' : 'Music';
-      sendMacOSCommand('next', targetApp);
+    const audio = audioRef.current;
+    if (!audio || !selected.audioUrl) return;
+    if (!audio.paused) { audio.pause(); setIsPlaying(false); globalClock.sync(audio.currentTime, false, 0); }
+    else void audio.play().then(() => {
+      setIsPlaying(true); globalClock.sync(audio.currentTime, true, 0);
+    }).catch(() => {
+      setIsPlaying(false);
+      setSyncFeedback('Audio unavailable — choose another preview or file');
+    });
+  }, []);
+  const switchLocalTrack = useCallback((id: string | null) => {
+    if (!id) { setIsPlaying(false); return; }
+    const next = libraryStore.getPlayable(id);
+    if (!next?.audioUrl) {
+      setIsPlaying(false);
+      setSyncFeedback('Track is metadata only — reselect its source');
       return;
     }
-    const currentIdx = DEMO_TRACKS.findIndex(t => t.title === currentTrack.title);
-    const nextIdx = (currentIdx + 1) % DEMO_TRACKS.length;
-    setCurrentTrack(DEMO_TRACKS[nextIdx]);
+    libraryStore.play(next);
+    setCurrentTrack(next);
     globalClock.reset(0, true);
-  }, [currentTrack]);
-
-  const handlePrev = useCallback(() => {
-    if (currentTrack.source.startsWith('macos-')) {
-      const targetApp = currentTrack.source === 'macos-spotify' ? 'Spotify' : 'Music';
-      sendMacOSCommand('previous', targetApp);
-      return;
-    }
-    const currentIdx = DEMO_TRACKS.findIndex(t => t.title === currentTrack.title);
-    const prevIdx = (currentIdx - 1 + DEMO_TRACKS.length) % DEMO_TRACKS.length;
-    setCurrentTrack(DEMO_TRACKS[prevIdx]);
-    globalClock.reset(0, true);
-  }, [currentTrack]);
-
-  const handleSeek = useCallback((seconds: number) => {
-    if (currentTrack.source.startsWith('macos-')) {
-      const targetApp = currentTrack.source === 'macos-spotify' ? 'Spotify' : 'Music';
-      sendMacOSCommand('seek', targetApp, { position: seconds });
-    }
-    if (audioRef.current && isFinite(seconds)) {
-      audioRef.current.currentTime = seconds;
-    }
-    globalClock.reset(seconds, isPlaying);
-    setCurrentTime(seconds);
-  }, [currentTrack, isPlaying]);
-
-  const handleSelectSearchedTrack = useCallback((track: Track) => {
-    setCurrentTrack(track);
-    globalClock.reset(0, true);
+    setCurrentTime(0);
     setIsPlaying(true);
   }, []);
-
+  const handleNext = useCallback((automatic = false) => {
+    const selected = currentTrackRef.current;
+    if (selected.source.startsWith('macos-')) {
+      if (!automatic) void sendMacOSCommand('next', selected.source === 'macos-spotify' ? 'Spotify' : 'Music');
+      return;
+    }
+    const next = libraryStore.adjacent(selected.id, 1, automatic);
+    if (!next && automatic) { setIsPlaying(false); globalClock.sync(0, false, 0); return; }
+    if (next === selected.id && automatic) {
+      const audio = audioRef.current;
+      if (audio) { audio.currentTime = 0; void audio.play().catch(() => setIsPlaying(false)); }
+      globalClock.reset(0, true);
+      return;
+    }
+    switchLocalTrack(next);
+  }, [switchLocalTrack]);
+  nextRef.current = handleNext;
+  const handlePrev = useCallback(() => {
+    const selected = currentTrackRef.current;
+    if (selected.source.startsWith('macos-')) {
+      void sendMacOSCommand('previous', selected.source === 'macos-spotify' ? 'Spotify' : 'Music');
+      return;
+    }
+    if (audioRef.current && audioRef.current.currentTime > 3) {
+      audioRef.current.currentTime = 0;
+      globalClock.reset(0, !audioRef.current.paused);
+      return;
+    }
+    switchLocalTrack(libraryStore.adjacent(selected.id, -1));
+  }, [switchLocalTrack]);
+  const handleSeek = useCallback((seconds: number) => {
+    const selected = currentTrackRef.current;
+    if (!Number.isFinite(seconds) || seconds < 0) return;
+    if (selected.source.startsWith('macos-')) {
+      void sendMacOSCommand('seek', selected.source === 'macos-spotify' ? 'Spotify' : 'Music', { position: seconds });
+    } else if (audioRef.current?.src) {
+      audioRef.current.currentTime = Math.min(seconds, Number.isFinite(audioRef.current.duration) ? audioRef.current.duration : seconds);
+    }
+    globalClock.reset(seconds, audioRef.current ? !audioRef.current.paused : false);
+    setCurrentTime(seconds);
+  }, []);
+  const handleSelectSearchedTrack = useCallback((track: Track) => {
+    libraryStore.play(track);
+    setCurrentTrack(track); globalClock.reset(0, true);
+    setCurrentTime(0); setIsPlaying(true);
+  }, []);
   const handleFileUpload = useCallback((file: File) => {
+    if (!file.type.startsWith('audio/') && !/\.(mp3|m4a|aac|ogg|wav|flac)$/i.test(file.name)) {
+      setSyncFeedback('Select an audio file to play locally'); return;
+    }
     const localTrack = createTrackFromFile(file);
-    setCurrentTrack(localTrack);
-    globalClock.reset(0, true);
-    setIsPlaying(true);
+    if (localTrack.audioUrl) importedAudioUrls.current.add(localTrack.audioUrl);
+    libraryStore.play(localTrack);
+    setCurrentTrack(localTrack); globalClock.reset(0, true);
+    setCurrentTime(0); setIsPlaying(true);
     setIsSettingsOpen(false);
+  }, []);
+  const toggleLocalMute = useCallback(() => {
+    const volume = libraryStore.getSnapshot().volume;
+    if (volume > 0) { previousVolume.current = volume; libraryStore.setVolume(0); }
+    else libraryStore.setVolume(previousVolume.current || 0.8);
   }, []);
 
   const toggleFullscreen = useCallback(() => {
@@ -434,6 +492,11 @@ export const App: React.FC = () => {
           <a href={window.location.pathname + "?mode=spotify"}
             className="rounded-full border border-emerald-400/30 bg-emerald-500/15 px-3 py-2 text-xs font-semibold text-emerald-200 transition hover:bg-emerald-500/25"
             aria-label="Follow Spotify playback">Follow Spotify</a>
+          <button onClick={() => setIsLibraryOpen(true)}
+            className="rounded-full border border-white/20 bg-black/30 px-3 py-2 text-xs text-white/90 transition hover:bg-white/10"
+            aria-label="Open music library">
+            <Library size={15} className="mr-1 inline"/> Library
+          </button>
           {/* Dynamic Slights (Pure White Icon Only - No Button Styling) */}
           <button
             onClick={() => setRimConfig(c => ({ ...c, enabled: !c.enabled }))}
@@ -492,13 +555,15 @@ export const App: React.FC = () => {
               onAdjustSync={adjustSyncOffset}
               onToggleLyricStyle={toggleLyricStyle}
               onPlayPause={handlePlayPause}
-              onNext={handleNext}
+              onNext={() => handleNext()}
               onPrev={handlePrev}
               onSeek={handleSeek}
               onOpenSettings={() => setIsSettingsOpen(true)}
               onOpenSearch={() => setIsSearchOpen(true)}
               isMicActive={isMicActive}
               onToggleMic={handleToggleMic}
+              volume={library.volume}
+              onToggleMute={toggleLocalMute}
             />
           </div>
         ) : (
@@ -572,6 +637,10 @@ export const App: React.FC = () => {
         onClose={() => setIsSearchOpen(false)}
         onSelectTrack={handleSelectSearchedTrack}
       />
+
+      <LocalLibraryPanel open={isLibraryOpen} onClose={() => setIsLibraryOpen(false)}
+        nowPlayingId={currentTrack.id}
+        onPlay={track => { handleSelectSearchedTrack(track); setIsLibraryOpen(false); }} />
     </div>
   );
 };
