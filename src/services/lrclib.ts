@@ -189,7 +189,7 @@ async function lookupFresh(
     if (response.status !== 'ok') continue;
     const records = Array.isArray(response.data) ? response.data : [response.data];
     for (const item of records) {
-      if (!validRecord(item) || !Number.isFinite(matchScore(item, title, artist, albumName, duration))) continue;
+      if (!validRecord(item) || !Number.isFinite(matchScore(item, trackName, artistName, albumName, duration))) continue;
       if (item.instrumental && !item.plainLyrics && !item.syncedLyrics) instrumentalFound = true;
       else candidates.set(item.id, item);
     }
@@ -199,7 +199,7 @@ async function lookupFresh(
   }
 
   const ranked = [...candidates.values()].sort(
-    (a, b) => matchScore(b, title, artist, albumName, duration) - matchScore(a, title, artist, albumName, duration)
+    (a, b) => matchScore(b, trackName, artistName, albumName, duration) - matchScore(a, trackName, artistName, albumName, duration)
   );
   for (const record of ranked) {
     if (signal?.aborted) throw new DOMException('Lyrics lookup aborted', 'AbortError');
