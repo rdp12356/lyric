@@ -76,5 +76,13 @@ global.fetch = async (uri, options) => {
   assert.equal(stillLimited.issue, 'rate-limited');
   assert.equal(calls.length, after429, 'retry-after cooldown must not generate extra requests');
 
+  // Online lyrics expire; imported LRC files remain usable offline.
+  const originalNow = Date.now;
+  const importedKey = cache.lyricsKey('Offline Song', 'Artist', '', 0);
+  cache.cacheLyrics(importedKey, { source: 'Imported LRC', lines: [{ id: 1, time: 0, endTime: 10, text: 'Offline sample' }] });
+  Date.now = () => originalNow() + 8 * 24 * 60 * 60 * 1000;
+  assert.equal(cache.cachedLyrics(key), null, 'online lyrics cache must expire');
+  assert(cache.cachedLyrics(importedKey), 'offline imported LRC must not expire');
+  Date.now = originalNow;
   console.log('PASS: LRCLIB request deduplication, true refresh, sync matching, cache persistence, version length safety and 429 cooldown.');
 })().catch(error => { console.error(error); process.exit(1); });
