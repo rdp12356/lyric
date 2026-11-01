@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React from 'react';
 import { Track, LyricStyle } from '../types';
 import {
   Play,
@@ -31,6 +31,8 @@ interface LockscreenPlayerBarProps {
   onOpenSearch: () => void;
   isMicActive?: boolean;
   onToggleMic?: () => void;
+  volume?: number;
+  onToggleMute?: () => void;
 }
 
 export const LockscreenPlayerBar = React.forwardRef<HTMLDivElement, LockscreenPlayerBarProps>(({
@@ -49,9 +51,11 @@ export const LockscreenPlayerBar = React.forwardRef<HTMLDivElement, LockscreenPl
   onOpenSettings,
   onOpenSearch,
   isMicActive,
-  onToggleMic
+  onToggleMic,
+  volume = 0.8,
+  onToggleMute
 }, ref) => {
-  const [isMuted, setIsMuted] = useState(false);
+  const isMuted = volume <= 0;
 
   return (
     <div className="fixed bottom-7 left-1/2 -translate-x-1/2 z-40 select-none animate-in fade-in slide-in-from-bottom-5 duration-300">
@@ -207,9 +211,10 @@ export const LockscreenPlayerBar = React.forwardRef<HTMLDivElement, LockscreenPl
 
           {/* Volume toggle */}
           <button
-            onClick={() => setIsMuted(!isMuted)}
+            onClick={onToggleMute}
+            disabled={track.source.startsWith('macos-') || !onToggleMute}
             className="text-white/80 hover:text-white active:scale-90 transition p-1.5 focus:outline-none"
-            title={isMuted ? 'Unmute' : 'Mute'}
+            title={track.source.startsWith('macos-') ? 'Volume controlled by external player' : isMuted ? 'Unmute local audio' : 'Mute local audio'}
           >
             {isMuted ? <VolumeX className="w-4 h-4 text-white" /> : <Volume2 className="w-4 h-4 text-white" />}
           </button>
