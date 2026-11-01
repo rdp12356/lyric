@@ -71,7 +71,7 @@ export const lyricsProviders: readonly LyricsProvider[] = [{
   supportedFormats: ['plain', 'lrc', 'word'],
   async searchLyrics(track, signal) {
     if (signal?.aborted) return [];
-    const records = await searchLRCLIB(track.name + ' ' + track.artist);
+    const records = await searchLRCLIB(track.name + ' ' + track.artist, signal);
     if (signal?.aborted) return [];
     return records.filter(record => record.id > 0 && (record.plainLyrics || record.syncedLyrics))
       .map(record => convert(record, track))
@@ -80,11 +80,11 @@ export const lyricsProviders: readonly LyricsProvider[] = [{
   },
   async getLyrics(candidate, track, signal) {
     if (signal?.aborted) return null;
-    const result = await fetchLRCLIBLyricsById(candidate.id, track.name, track.artist, track.album, track.duration);
+    const result = await fetchLRCLIBLyricsById(candidate.id, track.name, track.artist, track.album, track.duration, signal);
     if (signal?.aborted) return null;
     return result.lyrics;
   }
 }];
-export async function findLyrics(track: LyricsTrack, refresh = false) {
-  return lookupLyricsFromLRCLIB(track.name, track.artist, track.album, track.duration, { refresh });
+export async function findLyrics(track: LyricsTrack, refresh = false, signal?: AbortSignal) {
+  return lookupLyricsFromLRCLIB(track.name, track.artist, track.album, track.duration, { refresh, signal });
 }
