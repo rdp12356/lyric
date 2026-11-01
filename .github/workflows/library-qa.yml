@@ -26,6 +26,9 @@ jobs:
           cache: npm
       - name: Install locked dependencies
         run: npm ci --ignore-scripts
+      - name: Production dependency audit (informational until advisories are triaged)
+        continue-on-error: true
+        run: npm audit --omit=dev --audit-level=high
       - name: TypeScript check and production build
         run: npm run build
       - name: Pure data and Spotify regression tests
