@@ -28,6 +28,8 @@ export interface LibraryBackup {
 }
 
 const KEY = 'lyric.music-library.v1';
+// Session-only file handles: never serialized, and invalid after a browser restart.
+const localSessionAudio = new Map<string, string>();
 const validSources: readonly AudioSourceType[] = [
   'demo', 'search', 'local-file', 'spotify-web', 'android-media', 'macos-music', 'macos-spotify'
 ];
@@ -164,6 +166,10 @@ export class MusicLibraryStore {
   playNow(input: Track | SavedTrack): SavedTrack | null {
     const track = sanitizeTrack(input);
     if (!track) return null;
+    if (track.source === 'local-file' && typeof input.audioUrl === 'string'
+      && input.audioUrl.startsWith('blob:') && input.audioUrl.length < 2048) {
+      localSessionAudio.set(track.id, input.audioUrl);
+    }
     this.update(s => {
       const queue = s.queue.some(t => t.id === track.id) ?
         s.queue.map(t => t.id === track.id ? track : t) : [...s.queue, track].slice(-200);
@@ -327,9 +333,15 @@ export function useMusicLibrary() {
   return useSyncExternalStore(musicLibrary.subscribe, musicLibrary.getSnapshot, musicLibrary.getSnapshot);
 }
 export function playbackTrack(saved: SavedTrack): Track {
-  return { ...saved, position: 0, isPlaying: false };
+  return {
+    ...saved,
+    ...(saved.source === 'local-file' && localSessionAudio.has(saved.id)
+      ? { audioUrl: localSessionAudio.get(saved.id) } : {}),
+    position: 0, isPlaying: false
+  };
 }
 export function canPlaySavedTrack(track: SavedTrack): boolean {
+  if (track.source === 'local-file') return localSessionAudio.has(track.id);
   if (track.source !== 'demo' && track.source !== 'search') return false;
   return !!track.audioUrl || (track.source === 'demo' && track.id.startsWith('demo-'));
 }
