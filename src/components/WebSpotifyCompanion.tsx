@@ -3,10 +3,10 @@ import { Music2, RefreshCw, Search, LogOut, Check, AlertCircle, ArrowLeft, Downl
 import {
   beginSpotifyBrowserLogin, disconnectSpotifyBrowser, finishSpotifyBrowserCallback,
   getSpotifyBrowserAccessToken, hasRememberedSpotifySession,
-  savedSpotifyClientId, webSpotifyRedirectUri
+  savedSpotifyClientId, webSpotifyRedirectUri, spotifyBrowserControlsAuthorized
 } from '../services/webSpotifyAuth';
 import {
-  readWebSpotifyPlayback, PlaybackRequestError, type SpotifyWebPlayback
+  readWebSpotifyPlayback, spotifyWebControl, PlaybackRequestError, type SpotifyWebPlayback
 } from '../services/webSpotifyPlayback';
 import { findLyrics, lyricsProviders, type LyricsCandidate, type LyricsTrack } from '../services/lyricsProviders';
 import { cachedLyrics, cacheLyrics, lyricsKey, removeCachedLyrics } from '../services/lyricsCache';
@@ -45,6 +45,7 @@ export default function WebSpotifyCompanion() {
   const [phase, setPhase] = useState<Phase>('checking');
   const [clientId, setClientId] = useState(savedSpotifyClientId);
   const [remember, setRemember] = useState(true);
+  const [allowControls, setAllowControls] = useState(spotifyBrowserControlsAuthorized);
   const [authError, setAuthError] = useState('');
   const [connection, setConnection] = useState('');
   const [playback, setPlayback] = useState<SpotifyWebPlayback | null>(null);
@@ -90,7 +91,7 @@ export default function WebSpotifyCompanion() {
         if (!alive) return;
         if (!authorized && !hasRememberedSpotifySession()) { setPhase('disconnected'); return; }
         await getSpotifyBrowserAccessToken();
-        if (alive) { setPhase('connected'); setAuthError(''); }
+        if (alive) { setPhase('connected'); setAllowControls(spotifyBrowserControlsAuthorized()); setAuthError(''); }
       } catch (error) {
         if (alive) { setPhase('disconnected'); setAuthError(describe(error)); }
       }
@@ -102,13 +103,13 @@ export default function WebSpotifyCompanion() {
     setPhase('checking'); setAuthError('');
     try {
       await getSpotifyBrowserAccessToken(true);
-      setPhase('connected');
+      setPhase('connected'); setAllowControls(spotifyBrowserControlsAuthorized());
     } catch (error) { setAuthError(describe(error)); setPhase('disconnected'); }
   }, []);
   const disconnect = useCallback(() => {
     requestId.current++; lyricRequestId.current++;
     disconnectSpotifyBrowser();
-    setPhase('disconnected'); setPlayback(null); playbackRef.current = null;
+    setPhase('disconnected'); setAllowControls(false); setPlayback(null); playbackRef.current = null;
     setLyrics(null); setConnection(''); setAuthError('');
     lastKey.current = ''; clock.current.reset(0, false);
   }, []);
@@ -293,6 +294,20 @@ export default function WebSpotifyCompanion() {
     setManualResult(true); setLyrics(imported); setLyricsError('');
     cacheLyrics(activeCacheKey, imported);
   };
+  const seekSpotifyLine = async (lineTime: number) => {
+    if (!playback?.canSeek || !allowControls) return;
+    try {
+      await spotifyWebControl('seek', lineTime);
+      clock.current.reset(lineTime, playback.playing);
+      setSeconds(lineTime);
+      setConnection('');
+    } catch (error) { setConnection(describe(error)); }
+  };
+  const togglePlayback = async () => {
+    if (!allowControls || !playback) return;
+    try { await spotifyWebControl(playback.playing ? 'pause' : 'resume'); setConnection(''); }
+    catch (error) { setConnection(describe(error)); }
+  };
   const updateOffset = (value: number) => {
     if (!trackId) return;
     const number = Math.max(-15000, Math.min(15000, value));
@@ -343,6 +358,10 @@ export default function WebSpotifyCompanion() {
                 onChange={event => setClientId(event.target.value.trim())} />
             </label>
             <label className="flex items-start gap-2 text-xs text-white/60">
+              <input aria-label="Allow Spotify playback controls" type="checkbox" checked={allowControls} onChange={e => setAllowControls(e.target.checked)} />
+              Optional: allow lyric-line seeking and pause/resume controls (requests Spotify's extra playback-control permission).
+            </label>
+            <label className="flex items-start gap-2 text-xs text-white/60">
               <input aria-label="Remember Spotify sign-in" type="checkbox" checked={remember} onChange={e => setRemember(e.target.checked)} />
               Remember my connection on this browser (stores a refresh token in browser storage, which is less secure than a backend).
             </label>
@@ -353,7 +372,7 @@ export default function WebSpotifyCompanion() {
             </div>
             <button className="w-full rounded-xl bg-[#1ed760] p-3 font-semibold text-[#06110a] disabled:opacity-40"
               disabled={!/^[a-f0-9]{32}$/i.test(clientId)}
-              onClick={() => void beginSpotifyBrowserLogin(clientId, remember).catch(error => setAuthError(describe(error)))}>
+              onClick={() => void beginSpotifyBrowserLogin(clientId, remember, allowControls).catch(error => setAuthError(describe(error)))}>
               Connect with Spotify
             </button>
             {hasRememberedSpotifySession() && <button className={BUTTON + ' w-full'} onClick={() => void reconnect()}>
@@ -373,6 +392,7 @@ export default function WebSpotifyCompanion() {
           <div>{playback?.playing ? 'Playing' : playback ? 'Paused' : 'Waiting'}</div>
           <div>{formatTime(seconds)} / {formatTime(playback?.duration || 0)}</div>
         </div>
+        {allowControls && playback && <button className={BUTTON} onClick={() => void togglePlayback()} aria-label={playback.playing ? 'Pause Spotify' : 'Resume Spotify'}>{playback.playing ? 'Pause' : 'Play'}</button>}
         {spotifyUrl && <a href={spotifyUrl} target="_blank" rel="noopener noreferrer" title="Open song in Spotify"
           className={BUTTON}><ExternalLink size={15} /></a>}
       </section>
@@ -396,7 +416,7 @@ export default function WebSpotifyCompanion() {
         </div>}
         {lyricsError && <p role="status" className="p-3 text-center text-xs text-amber-200">{lyricsError}</p>}
         {lyrics && (showPlain || lyrics.synced) ?
-          <SpotifyLyricsPanel lyrics={lyrics} time={seconds} offsetMs={offsetMs} fontSize={fontSize} /> :
+          <SpotifyLyricsPanel lyrics={lyrics} time={seconds} offsetMs={offsetMs} fontSize={fontSize} onSeek={playback?.canSeek && allowControls ? lineTime => { void seekSpotifyLine(lineTime); } : undefined} /> :
           <div className="flex flex-1 items-center justify-center px-6 text-center text-white/45">
             {playback ? 'No synchronized lyrics found for this recording.' : 'Start playback in Spotify and return here.'}
           </div>}
