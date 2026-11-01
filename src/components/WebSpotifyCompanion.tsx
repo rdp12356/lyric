@@ -199,12 +199,13 @@ export default function WebSpotifyCompanion() {
   useEffect(() => {
     if (!track || !autoFollow || manualResult) return;
     let alive = true;
+    const abort = new AbortController();
     const identity = ++lyricRequestId.current;
     setLyricsLoading(true); setLyricsError(''); setLyrics(null);
     setOffsetMs(readOffsets()[trackId] || 0);
     const cached = cachedLyrics(activeCacheKey);
     if (cached) { setLyrics(cached); setLyricsLoading(false); return; }
-    void findLyrics(track).then(result => {
+    void findLyrics(track, false, abort.signal).then(result => {
       if (!alive || identity !== lyricRequestId.current) return;
       setLyrics(result.lyrics);
       const errors = {
@@ -221,7 +222,7 @@ export default function WebSpotifyCompanion() {
         setLyricsError(describe(error)); setLyricsLoading(false);
       }
     });
-    return () => { alive = false; lyricRequestId.current++; };
+    return () => { alive = false; abort.abort(); lyricRequestId.current++; };
   }, [trackId, autoFollow, manualResult, activeCacheKey]);
   useEffect(() => { setManualResult(false); setSearchOpen(false); }, [trackId]);
 
