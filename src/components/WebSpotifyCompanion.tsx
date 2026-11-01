@@ -294,7 +294,7 @@ export default function WebSpotifyCompanion() {
     setManualResult(true); setLyrics(imported); setLyricsError('');
     cacheLyrics(activeCacheKey, imported);
   };
-  const seekSpotifyLine = async (lineTime: number) => {
+  const seekSpotifyLine = useCallback(async (lineTime: number) => {
     if (!playback?.canSeek || !allowControls) return;
     try {
       await spotifyWebControl('seek', lineTime);
@@ -302,7 +302,7 @@ export default function WebSpotifyCompanion() {
       setSeconds(lineTime);
       setConnection('');
     } catch (error) { setConnection(describe(error)); }
-  };
+  }, [playback?.canSeek, playback?.playing, allowControls]);
   const togglePlayback = async () => {
     if (!allowControls || !playback) return;
     try { await spotifyWebControl(playback.playing ? 'pause' : 'resume'); setConnection(''); }
@@ -416,7 +416,7 @@ export default function WebSpotifyCompanion() {
         </div>}
         {lyricsError && <p role="status" className="p-3 text-center text-xs text-amber-200">{lyricsError}</p>}
         {lyrics && (showPlain || lyrics.synced) ?
-          <SpotifyLyricsPanel lyrics={lyrics} time={seconds} offsetMs={offsetMs} fontSize={fontSize} onSeek={playback?.canSeek && allowControls ? lineTime => { void seekSpotifyLine(lineTime); } : undefined} /> :
+          <SpotifyLyricsPanel lyrics={lyrics} time={seconds} offsetMs={offsetMs} fontSize={fontSize} onSeek={playback?.canSeek && allowControls ? seekSpotifyLine : undefined} /> :
           <div className="flex flex-1 items-center justify-center px-6 text-center text-white/45">
             {playback ? 'No synchronized lyrics found for this recording.' : 'Start playback in Spotify and return here.'}
           </div>}
