@@ -49,3 +49,4 @@ jobs:
             sleep 1
           done
           timeout 100s node tests/web-spotify-ui.cjs
+          timeout 100s node tests/web-spotify-stale-lyrics.cjs
