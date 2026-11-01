@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Music2, RefreshCw, Search, LogOut, Check, AlertCircle, ArrowLeft, Download, ExternalLink, Settings2 } from 'lucide-react';
+import { Music2, RefreshCw, Search, LogOut, Check, AlertCircle, ArrowLeft, Download, ExternalLink, Settings2, Heart } from 'lucide-react';
 import {
   beginSpotifyBrowserLogin, disconnectSpotifyBrowser, finishSpotifyBrowserCallback,
   getSpotifyBrowserAccessToken, hasRememberedSpotifySession,
@@ -14,6 +14,7 @@ import { parseLRC } from '../services/lrcParser';
 import { SyncClock } from '../services/syncClock';
 import { SpotifyLyricsPanel } from './SpotifyLyricsPanel';
 import type { LyricsData } from '../types';
+import { libraryStore, useLibrary } from '../services/libraryStore';
 
 const OFFSET_STORE = 'lyric.web.song.offsets.v1';
 const FONT_STORE = 'lyric.web.font.size.v1';
@@ -43,6 +44,7 @@ function playerTrack(value: SpotifyWebPlayback): LyricsTrack {
 }
 export default function WebSpotifyCompanion() {
   const [phase, setPhase] = useState<Phase>('checking');
+  const localLibrary = useLibrary();
   const [clientId, setClientId] = useState(savedSpotifyClientId);
   const [remember, setRemember] = useState(true);
   const [allowControls, setAllowControls] = useState(spotifyBrowserControlsAuthorized);
@@ -72,6 +74,23 @@ export default function WebSpotifyCompanion() {
   const lyricRequestId = useRef(0);
   const lrcInput = useRef<HTMLInputElement>(null);
   const track = playback ? playerTrack(playback) : null;
+  const libraryTrackId = playback ? 'spotify:' + (playback.uri || playback.trackId) : '';
+  const savedFavorite = !!libraryTrackId && localLibrary.favorites.includes(libraryTrackId);
+  useEffect(() => {
+    if (!playback) return;
+    libraryStore.markNowPlaying({
+      id: 'spotify:' + (playback.uri || playback.trackId),
+      title: playback.title, artist: playback.artist,
+      album: playback.album, albumArt: playback.artwork,
+      duration: playback.duration, position: playback.position,
+      isPlaying: playback.playing, source: 'spotify-web'
+    });
+  }, [playback?.trackId, playback?.uri]);
+  const toggleCurrentFavorite = () => {
+    if (!libraryTrackId) return;
+    libraryStore.favorite(libraryTrackId);
+  };
+
   const trackId = track?.id || '';
   const activeCacheKey = track ? lyricsKey(track.name, track.artist, track.album, track.duration) : '';
   const spotifyUrl = trackId && /^[a-zA-Z0-9]{22}$/.test(trackId) ? 'https://open.spotify.com/track/' + trackId : '';
@@ -403,6 +422,9 @@ export default function WebSpotifyCompanion() {
           <div>{playback?.playing ? 'Playing' : playback ? 'Paused' : 'Waiting'}</div>
           <div>{formatTime(seconds)} / {formatTime(playback?.duration || 0)}</div>
         </div>
+        {playback && <button className={BUTTON} onClick={toggleCurrentFavorite}
+          aria-label={savedFavorite ? 'Remove saved Spotify song' : 'Save Spotify song to library'}
+          title="Save track metadata locally; Spotify playback remains external"><Heart size={15} fill={savedFavorite ? 'currentColor' : 'none'} /></button>}
         {allowControls && playback && <button className={BUTTON} onClick={() => void togglePlayback()} aria-label={playback.playing ? 'Pause Spotify' : 'Resume Spotify'}>{playback.playing ? 'Pause' : 'Play'}</button>}
         {spotifyUrl && <a href={spotifyUrl} target="_blank" rel="noopener noreferrer" title="Open song in Spotify"
           className={BUTTON}><ExternalLink size={15} /></a>}
