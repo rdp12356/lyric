@@ -43,7 +43,7 @@ const assert = require('node:assert/strict');
     await dialog.getByRole('button', { name: 'Remove favorite Blinding Lights' }).waitFor();
     await dialog.getByRole('button', { name: 'Playlists' }).click();
     await dialog.getByRole('button', { name: 'After Hours 1 tracks' }).waitFor();
-    await dialog.getByRole('button', { name: 'Queue' }).click();
+    await dialog.getByRole('button', { name: 'Queue', exact: true }).click();
     await dialog.getByRole('button', { name: 'Repeat queue' }).waitFor();
     assert.equal(await dialog.getByRole('button', { name: 'Toggle shuffle' }).getAttribute('aria-pressed'), 'true');
 
