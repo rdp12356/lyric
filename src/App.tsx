@@ -210,16 +210,17 @@ export const App: React.FC = () => {
       if (audioRef.current.src !== currentTrack.audioUrl) {
         audioRef.current.src = currentTrack.audioUrl;
         audioRef.current.load();
-        if (playOnTrackChange.current) {
-          void audioRef.current.play().then(() => {
-            setIsPlaying(true);
-          }).catch(e => {
-            console.warn('Autoplay prevented:', e);
-            setIsPlaying(false);
-            setSyncFeedback('Tap Play to start audio');
-          });
-          playOnTrackChange.current = false;
-        }
+      }
+      if (playOnTrackChange.current) {
+        audioRef.current.currentTime = 0;
+        void audioRef.current.play().then(() => {
+          setIsPlaying(true);
+        }).catch(e => {
+          console.warn('Autoplay prevented:', e);
+          setIsPlaying(false);
+          setSyncFeedback('Tap Play to start audio');
+        });
+        playOnTrackChange.current = false;
       }
     }
 
@@ -330,7 +331,7 @@ export const App: React.FC = () => {
       setSyncFeedback('Audio file unavailable · re-import it or play in the official app');
       return;
     }
-    musicLibrary.playNow(candidate);
+    if (musicLibrary.getSnapshot().currentId !== candidate.id) musicLibrary.playNow(candidate);
     playOnTrackChange.current = true;
     setCurrentTrack(candidate);
     setDuration(candidate.duration);
