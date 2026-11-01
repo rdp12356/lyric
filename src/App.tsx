@@ -152,7 +152,10 @@ export const App: React.FC = () => {
     try {
       // Seed demo previews once per browser, not after the user clears the queue.
       if (localStorage.getItem('lyric.music-library.seeded.v1') !== '1') {
-        if (!musicLibrary.getSnapshot().queue.length) DEMO_TRACKS.forEach(track => musicLibrary.queueTrack(track));
+        if (!musicLibrary.getSnapshot().queue.length) {
+          DEMO_TRACKS.forEach(track => musicLibrary.queueTrack(track));
+          musicLibrary.selectQueueItem(DEMO_TRACKS[0].id);
+        }
         localStorage.setItem('lyric.music-library.seeded.v1', '1');
       }
     } catch { /* Browser storage is optional. */ }
