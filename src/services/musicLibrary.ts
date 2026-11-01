@@ -343,5 +343,6 @@ export function playbackTrack(saved: SavedTrack): Track {
 export function canPlaySavedTrack(track: SavedTrack): boolean {
   if (track.source === 'local-file') return localSessionAudio.has(track.id);
   if (track.source !== 'demo' && track.source !== 'search') return false;
-  return !!track.audioUrl || (track.source === 'demo' && track.id.startsWith('demo-'));
+  // Never infer that a track can play merely from a "demo-" ID in backup JSON.
+  return !!track.audioUrl && allowPreview(track.audioUrl);
 }
