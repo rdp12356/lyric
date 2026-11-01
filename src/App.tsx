@@ -393,6 +393,59 @@ export const App: React.FC = () => {
     else libraryStore.setVolume(previousVolume.current || 0.8);
   }, []);
 
+  // Publish local-audio metadata and controls to compatible browsers/headsets.
+  // Spotify remains external; do not hijack the OS media session for it.
+  useEffect(() => {
+    if (!('mediaSession' in navigator) || !currentTrack.audioUrl || currentTrack.source.startsWith('macos-')) return;
+    const session = navigator.mediaSession;
+    try {
+      session.metadata = new MediaMetadata({
+        title: currentTrack.title,
+        artist: currentTrack.artist,
+        album: currentTrack.album,
+        artwork: currentTrack.albumArt && currentTrack.albumArt.startsWith('https://')
+          ? [{ src: currentTrack.albumArt, sizes: '512x512', type: 'image/jpeg' }] : []
+      });
+    } catch { /* Unsupported artwork/metadata fields are optional. */ }
+    const handlers: Array<[MediaSessionAction, MediaSessionActionHandler]> = [
+      ['play', () => { if (audioRef.current?.paused) handlePlayPause(); }],
+      ['pause', () => { if (audioRef.current && !audioRef.current.paused) handlePlayPause(); }],
+      ['nexttrack', () => handleNext()],
+      ['previoustrack', () => handlePrev()],
+      ['seekto', details => { if (typeof details.seekTime === 'number') handleSeek(details.seekTime); }],
+      ['seekbackward', details => handleSeek(Math.max(0, audioRef.current?.currentTime || 0) - (details.seekOffset || 10))],
+      ['seekforward', details => handleSeek((audioRef.current?.currentTime || 0) + (details.seekOffset || 10))]
+    ];
+    for (const [action, callback] of handlers) {
+      try { session.setActionHandler(action, callback); } catch { /* Browser does not support this action. */ }
+    }
+    return () => {
+      for (const [action] of handlers) {
+        try { session.setActionHandler(action, null); } catch { /* Graceful fallback. */ }
+      }
+    };
+  }, [currentTrack.id, currentTrack.title, currentTrack.artist, currentTrack.album, currentTrack.albumArt, currentTrack.audioUrl, currentTrack.source, handlePlayPause, handleNext, handlePrev, handleSeek]);
+  useEffect(() => {
+    if (!('mediaSession' in navigator)) return;
+    const session = navigator.mediaSession;
+    if (currentTrack.source.startsWith('macos-') || !currentTrack.audioUrl) return;
+    session.playbackState = isPlaying ? 'playing' : 'paused';
+    const update = () => {
+      const audio = audioRef.current;
+      if (!audio || !Number.isFinite(audio.duration) || audio.duration <= 0) return;
+      try {
+        session.setPositionState({
+          duration: audio.duration,
+          playbackRate: audio.playbackRate,
+          position: Math.min(audio.duration, Math.max(0, audio.currentTime))
+        });
+      } catch { /* Position metadata is optional. */ }
+    };
+    update();
+    const id = window.setInterval(update, 2000);
+    return () => { window.clearInterval(id); };
+  }, [currentTrack.id, currentTrack.audioUrl, currentTrack.source, isPlaying]);
+
   const toggleFullscreen = useCallback(() => {
     if (!document.fullscreenElement) {
       document.documentElement.requestFullscreen().then(() => setIsFullscreen(true)).catch(() => {});
