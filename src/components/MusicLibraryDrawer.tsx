@@ -16,6 +16,7 @@ interface Props {
   playing?: Track | null;
   onPlayTrack: (track: SavedTrack) => void;
   suggestions?: Track[];
+  allowPlayback?: boolean;
 }
 type Section = 'queue' | 'favorites' | 'playlists' | 'history' | 'backup';
 const ACTION = 'rounded-xl border border-white/15 bg-white/10 px-3 py-2 text-xs font-semibold text-white transition hover:bg-white/20 disabled:opacity-30';
@@ -27,11 +28,11 @@ const TABS: readonly { id: Section; title: string }[] = [
   { id: 'backup', title: 'Backup' }
 ];
 function SongRow({
-  track, index, onPlay, actions
+  track, index, onPlay, actions, playable: allowPlay
 }: {
-  track: SavedTrack; index?: number; onPlay: () => void; actions?: React.ReactNode
+  track: SavedTrack; index?: number; onPlay: () => void; actions?: React.ReactNode; playable?: boolean
 }) {
-  const playable = canPlaySavedTrack(track);
+  const playable = allowPlay ?? canPlaySavedTrack(track);
   return <div className="flex min-w-0 items-center gap-2 rounded-xl border border-white/10 bg-white/[.045] p-2.5">
     {track.albumArt ? <img src={track.albumArt} alt="" loading="lazy"
       className="h-10 w-10 shrink-0 rounded-lg object-cover" /> :
@@ -48,7 +49,7 @@ function SongRow({
     {actions}
   </div>;
 }
-export function MusicLibraryDrawer({ open, onClose, playing, onPlayTrack, suggestions = [] }: Props) {
+export function MusicLibraryDrawer({ open, onClose, playing, onPlayTrack, suggestions = [], allowPlayback = true }: Props) {
   const state = useMusicLibrary();
   const [tab, setTab] = useState<Section>('queue');
   const [playlistName, setPlaylistName] = useState('');
@@ -59,8 +60,8 @@ export function MusicLibraryDrawer({ open, onClose, playing, onPlayTrack, sugges
   const favorite = playing && musicLibrary.isFavorite(playing.id);
   const notify = (value: string) => { setNotice(value); };
   const attemptPlay = (track: SavedTrack) => {
-    if (!canPlaySavedTrack(track)) {
-      notify('This track is metadata only. Re-import the local file or play it in the official music app.');
+    if (!allowPlayback || !canPlaySavedTrack(track)) {
+      notify('Playback stays with its original music source. Open the original Lyric player for saved previews.');
       return;
     }
     onPlayTrack(track);
@@ -124,7 +125,7 @@ export function MusicLibraryDrawer({ open, onClose, playing, onPlayTrack, sugges
             aria-label={favorite ? 'Remove current favorite' : 'Favorite current song'}>
             <Heart size={15} fill={favorite ? 'currentColor' : 'none'} /> {favorite ? 'Saved' : 'Favorite'}
           </button>
-          <button className={ACTION} onClick={() => musicLibrary.queueTrack(playing)}>Add to queue</button>
+          <button className={ACTION} onClick={() => musicLibrary.queueTrack(playing)} disabled={!allowPlayback || !canPlaySavedTrack(playing)}>Add to queue</button>
         </section>}
         {tab === 'queue' && <>
           <section className="flex flex-wrap items-center justify-between gap-2">
@@ -144,7 +145,7 @@ export function MusicLibraryDrawer({ open, onClose, playing, onPlayTrack, sugges
           </section>
           {!state.queue.length && <p className="text-xs text-white/50">Your queue is empty. Add a demo preview or search for music.</p>}
           <div className="space-y-2">{state.queue.map((song, i) => <div key={song.id} className={song.id === state.currentId ? 'rounded-xl ring-1 ring-emerald-500/50' : ''}>
-            <SongRow track={song} index={i} onPlay={() => attemptPlay(song)}
+            <SongRow track={song} index={i} playable={allowPlayback && canPlaySavedTrack(song)} onPlay={() => attemptPlay(song)}
               actions={<div className="flex shrink-0 gap-1">
                 <button aria-label={'Move up ' + song.title} className={ACTION} disabled={i === 0}
                   onClick={() => musicLibrary.reorderQueue(i, i - 1)}><ArrowUp size={13}/></button>
@@ -168,7 +169,7 @@ export function MusicLibraryDrawer({ open, onClose, playing, onPlayTrack, sugges
         {tab === 'favorites' && <>
           <h3 className="text-sm font-semibold">Favorites · {state.favorites.length}</h3>
           {!state.favorites.length && <p className="text-xs text-white/45">Tap Favorite while a song is playing to save it here.</p>}
-          {state.favorites.map(song => <SongRow key={song.id} track={song} onPlay={() => attemptPlay(song)}
+          {state.favorites.map(song => <SongRow key={song.id} track={song} playable={allowPlayback && canPlaySavedTrack(song)} onPlay={() => attemptPlay(song)}
             actions={<button className={ACTION} aria-label={'Remove favorite ' + song.title}
               onClick={() => musicLibrary.toggleFavorite(song)}><Heart size={14} fill="currentColor"/></button>} />)}
         </>}
@@ -202,7 +203,7 @@ export function MusicLibraryDrawer({ open, onClose, playing, onPlayTrack, sugges
             {playing && <button className={ACTION} onClick={() => musicLibrary.addToPlaylist(selected.id, playing)}>
               <Plus size={14} className="inline" /> Add now playing
             </button>}
-            {selected.tracks.map(track => <SongRow key={track.id} track={track} onPlay={() => attemptPlay(track)}
+            {selected.tracks.map(track => <SongRow key={track.id} track={track} playable={allowPlayback && canPlaySavedTrack(track)} onPlay={() => attemptPlay(track)}
               actions={<button className={ACTION} aria-label={'Remove ' + track.title + ' from playlist'}
                 onClick={() => musicLibrary.removeFromPlaylist(selected.id, track.id)}><X size={13}/></button>}/>)}
             {!selected.tracks.length && <p className="text-xs text-white/40">Add your current song to this playlist.</p>}
@@ -232,7 +233,7 @@ export function MusicLibraryDrawer({ open, onClose, playing, onPlayTrack, sugges
       </div>
       <footer className="flex shrink-0 items-center justify-between border-t border-white/10 px-4 py-3 text-[11px] text-white/45">
         <span className="flex items-center gap-1"><Check size={13} className="text-emerald-300"/> Saved locally</span>
-        <span>Preview availability depends on the source</span>
+        <span>{allowPlayback ? 'Preview availability depends on the source' : 'Spotify playback remains external'}</span>
       </footer>
     </aside>
   </div>;
