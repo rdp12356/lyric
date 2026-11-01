@@ -26,9 +26,13 @@ import { LockscreenPlayerBar } from './components/LockscreenPlayerBar';
 import { ControlsModal } from './components/ControlsModal';
 import { TrackSearchModal } from './components/TrackSearchModal';
 import { useLiquidGlass } from './hooks/useLiquidGlass';
+import { MusicLibraryDrawer } from './components/MusicLibraryDrawer';
+import { musicLibrary, playbackTrack, canPlaySavedTrack, type SavedTrack } from './services/musicLibrary';
+import { attachLyricMediaControls, setLyricMediaMetadata, setLyricMediaPosition, type WebMediaActions } from './services/webMediaSession';
 
 import {
   Sun,
+  Library,
   Maximize2,
   Minimize2,
   Clock
@@ -36,7 +40,12 @@ import {
 
 export const App: React.FC = () => {
   // Playback & Track State
-  const [currentTrack, setCurrentTrack] = useState<Track>(DEMO_TRACKS[0]);
+  const [currentTrack, setCurrentTrack] = useState<Track>(() => {
+    const state = musicLibrary.getSnapshot();
+    const last = state.queue.find(track => track.id === state.currentId);
+    const demo = last && DEMO_TRACKS.find(track => track.id === last.id);
+    return demo || (last && canPlaySavedTrack(last) ? playbackTrack(last) : DEMO_TRACKS[0]);
+  });
   const [isPlaying, setIsPlaying] = useState<boolean>(false);
   const [currentTime, setCurrentTime] = useState<number>(0);
   const [duration, setDuration] = useState<number>(DEMO_TRACKS[0].duration);
@@ -67,6 +76,7 @@ export const App: React.FC = () => {
   const [syncOffset, setSyncOffset] = useState<number>(0);
   const [isSettingsOpen, setIsSettingsOpen] = useState<boolean>(false);
   const [isSearchOpen, setIsSearchOpen] = useState<boolean>(false);
+  const [isLibraryOpen, setIsLibraryOpen] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState<boolean>(false);
   const [isMacBridgeOnline, setIsMacBridgeOnline] = useState<boolean>(false);
   const [isMicActive, setIsMicActive] = useState<boolean>(false);
@@ -75,6 +85,11 @@ export const App: React.FC = () => {
   const rootContainerRef = useRef<HTMLDivElement>(null);
   const lockscreenBarRef = useRef<HTMLDivElement>(null);
   const playerCardRef = useRef<HTMLDivElement>(null);
+  const endedRef = useRef<() => void>(() => {});
+  const sourceRef = useRef(currentTrack.source);
+  sourceRef.current = currentTrack.source;
+  const playOnTrackChange = useRef(false);
+  const mediaControlsRef = useRef<WebMediaActions>({ playPause() {}, next() {}, previous() {}, seek() {} });
 
   // Attach ybouane/liquidglass WebGL shader to glass HTML elements (darker, translucent glass)
   useLiquidGlass(rootContainerRef, [lockscreenBarRef, playerCardRef], {
@@ -110,13 +125,13 @@ export const App: React.FC = () => {
     };
 
     const handleTimeUpdate = () => {
-      if (!currentTrack.source.startsWith('macos-')) {
+      if (!sourceRef.current.startsWith('macos-')) {
         globalClock.sync(audio.currentTime, !audio.paused, 0);
       }
     };
 
     const handleEnded = () => {
-      handleNext();
+      endedRef.current();
     };
 
     audio.addEventListener('loadedmetadata', handleLoadedMetadata);
@@ -131,28 +146,43 @@ export const App: React.FC = () => {
       audio.removeEventListener('ended', handleEnded);
       audio.pause();
     };
-  }, [currentTrack]);
+  }, []);
 
-  // 2. High-Precision 120Hz / 60Hz RequestAnimationFrame Tick Loop
   useEffect(() => {
-    let loopId: number;
-
-    const tick = () => {
-      const nowPos = globalClock.now();
-      setCurrentTime(nowPos);
-
-      if (isPlaying) {
-        const energy = visualizerEngine.getAudioEnergy(nowPos, isPlaying);
-        setAudioEnergy(energy);
-      } else {
-        setAudioEnergy({ bass: 0.05, mid: 0.05, treble: 0.05, overall: 0.05 });
+    try {
+      // Seed demo previews once per browser, not after the user clears the queue.
+      if (localStorage.getItem('lyric.music-library.seeded.v1') !== '1') {
+        if (!musicLibrary.getSnapshot().queue.length) {
+          DEMO_TRACKS.forEach(track => musicLibrary.queueTrack(track));
+          musicLibrary.selectQueueItem(DEMO_TRACKS[0].id);
+        }
+        localStorage.setItem('lyric.music-library.seeded.v1', '1');
       }
+    } catch { /* Browser storage is optional. */ }
+  }, []);
 
-      loopId = requestAnimationFrame(tick);
+  useEffect(() => {
+    let frame = 0, lastPosition = 0, lastEnergy = 0;
+    const tick = (now: number) => {
+      if (now - lastPosition >= 33) {
+        const pos = globalClock.now();
+        setCurrentTime(previous => Math.abs(previous - pos) >= 0.03 ? pos : previous);
+        lastPosition = now;
+      }
+      if (now - lastEnergy >= 70) {
+        const next = isPlaying ? visualizerEngine.getAudioEnergy(globalClock.now(), true)
+          : { bass: 0.05, mid: 0.05, treble: 0.05, overall: 0.05 };
+        setAudioEnergy(previous => {
+          const change = Math.max(...(['bass','mid','treble','overall'] as const)
+            .map(key => Math.abs(previous[key] - next[key])));
+          return change > 0.02 ? next : previous;
+        });
+        lastEnergy = now;
+      }
+      frame = requestAnimationFrame(tick);
     };
-
-    loopId = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(loopId);
+    frame = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(frame);
   }, [isPlaying]);
 
   // 3. Extract palette and load lyrics when track changes
@@ -180,9 +210,17 @@ export const App: React.FC = () => {
       if (audioRef.current.src !== currentTrack.audioUrl) {
         audioRef.current.src = currentTrack.audioUrl;
         audioRef.current.load();
-        if (isPlaying) {
-          audioRef.current.play().catch(e => console.warn('Autoplay prevented:', e));
-        }
+      }
+      if (playOnTrackChange.current) {
+        audioRef.current.currentTime = 0;
+        void audioRef.current.play().then(() => {
+          setIsPlaying(true);
+        }).catch(e => {
+          console.warn('Autoplay prevented:', e);
+          setIsPlaying(false);
+          setSyncFeedback('Tap Play to start audio');
+        });
+        playOnTrackChange.current = false;
       }
     }
 
@@ -278,57 +316,111 @@ export const App: React.FC = () => {
           globalClock.sync(audioRef.current!.currentTime, true, 0);
         }).catch(err => {
           console.warn('Audio play error:', err);
-          setIsPlaying(true);
-          globalClock.sync(currentTime, true, 0);
+          setIsPlaying(false);
+          setSyncFeedback('Playback blocked · tap Play or choose a valid audio file');
+          globalClock.sync(currentTime, false, 0);
         });
       }
     }
   }, [isPlaying, currentTrack, currentTime]);
 
-  const handleNext = useCallback(() => {
-    if (currentTrack.source.startsWith('macos-')) {
-      const targetApp = currentTrack.source === 'macos-spotify' ? 'Spotify' : 'Music';
-      sendMacOSCommand('next', targetApp);
+  const activateLocalTrack = useCallback((saved: SavedTrack) => {
+    const originalDemo = DEMO_TRACKS.find(t => t.id === saved.id);
+    const candidate = originalDemo || playbackTrack(saved);
+    if (!originalDemo && !canPlaySavedTrack(saved)) {
+      setSyncFeedback('Audio file unavailable · re-import it or play in the official app');
       return;
     }
-    const currentIdx = DEMO_TRACKS.findIndex(t => t.title === currentTrack.title);
-    const nextIdx = (currentIdx + 1) % DEMO_TRACKS.length;
-    setCurrentTrack(DEMO_TRACKS[nextIdx]);
+    if (musicLibrary.getSnapshot().currentId !== candidate.id) musicLibrary.playNow(candidate);
+    playOnTrackChange.current = true;
+    setCurrentTrack(candidate);
+    setDuration(candidate.duration);
+    setCurrentTime(0);
+    setIsPlaying(true);
     globalClock.reset(0, true);
-  }, [currentTrack]);
+  }, []);
+
+  const handleNext = useCallback((ended = false) => {
+    if (currentTrack.source.startsWith('macos-')) {
+      const targetApp = currentTrack.source === 'macos-spotify' ? 'Spotify' : 'Music';
+      void sendMacOSCommand('next', targetApp);
+      return;
+    }
+    const library = musicLibrary.getSnapshot();
+    if (library.queue.length) {
+      const next = musicLibrary.nextTrack(ended);
+      if (next) { activateLocalTrack(next); return; }
+      if (ended) { setIsPlaying(false); audioRef.current?.pause(); globalClock.sync(currentTime, false, 0); }
+      setSyncFeedback('End of queue · enable Repeat queue to continue');
+      return;
+    }
+    const currentIdx = DEMO_TRACKS.findIndex(t => t.id === currentTrack.id);
+    activateLocalTrack(DEMO_TRACKS[(currentIdx + 1) % DEMO_TRACKS.length]);
+  }, [currentTrack, currentTime, activateLocalTrack]);
 
   const handlePrev = useCallback(() => {
     if (currentTrack.source.startsWith('macos-')) {
       const targetApp = currentTrack.source === 'macos-spotify' ? 'Spotify' : 'Music';
-      sendMacOSCommand('previous', targetApp);
+      void sendMacOSCommand('previous', targetApp);
       return;
     }
-    const currentIdx = DEMO_TRACKS.findIndex(t => t.title === currentTrack.title);
-    const prevIdx = (currentIdx - 1 + DEMO_TRACKS.length) % DEMO_TRACKS.length;
-    setCurrentTrack(DEMO_TRACKS[prevIdx]);
-    globalClock.reset(0, true);
-  }, [currentTrack]);
+    const library = musicLibrary.getSnapshot();
+    const previous = library.queue.length ? musicLibrary.previousTrack() : null;
+    if (previous) { activateLocalTrack(previous); return; }
+    if (library.queue.length) { setSyncFeedback('Beginning of queue'); return; }
+    const currentIdx = DEMO_TRACKS.findIndex(t => t.id === currentTrack.id);
+    activateLocalTrack(DEMO_TRACKS[(currentIdx - 1 + DEMO_TRACKS.length) % DEMO_TRACKS.length]);
+  }, [currentTrack, activateLocalTrack]);
+
+  // Audio element's ended listener is installed only once, and sees fresh controls.
+  endedRef.current = () => handleNext(true);
 
   const handleSeek = useCallback((seconds: number) => {
     if (currentTrack.source.startsWith('macos-')) {
       const targetApp = currentTrack.source === 'macos-spotify' ? 'Spotify' : 'Music';
       sendMacOSCommand('seek', targetApp, { position: seconds });
     }
-    if (audioRef.current && isFinite(seconds)) {
+    if (!currentTrack.source.startsWith('macos-') && audioRef.current && Number.isFinite(seconds)) {
       audioRef.current.currentTime = seconds;
     }
     globalClock.reset(seconds, isPlaying);
     setCurrentTime(seconds);
   }, [currentTrack, isPlaying]);
 
+  // Media controls are registered for Lyric-owned audio only. Spotify controls
+  // stay with Spotify; the Media Session handlers never recreate on each frame.
+  mediaControlsRef.current = {
+    playPause: handlePlayPause,
+    next: () => handleNext(),
+    previous: handlePrev,
+    seek: handleSeek
+  };
+  useEffect(() => {
+    if (currentTrack.source.startsWith('macos-') || currentTrack.source === 'spotify-web'
+      || currentTrack.source === 'android-media') return;
+    return attachLyricMediaControls(() => mediaControlsRef.current);
+  }, [currentTrack.source]);
+  useEffect(() => {
+    setLyricMediaMetadata(currentTrack, isPlaying);
+  }, [currentTrack.id, currentTrack.title, currentTrack.artist, currentTrack.album, currentTrack.albumArt, currentTrack.source, isPlaying]);
+  useEffect(() => {
+    if (currentTrack.source.startsWith('macos-')) return;
+    setLyricMediaPosition(currentTime, duration, isPlaying);
+  }, [Math.floor(currentTime), duration, isPlaying, currentTrack.source]);
+
   const handleSelectSearchedTrack = useCallback((track: Track) => {
+    musicLibrary.playNow(track);
+    playOnTrackChange.current = true;
     setCurrentTrack(track);
+    setDuration(track.duration);
     globalClock.reset(0, true);
     setIsPlaying(true);
   }, []);
 
   const handleFileUpload = useCallback((file: File) => {
     const localTrack = createTrackFromFile(file);
+    musicLibrary.playNow(localTrack);
+    playOnTrackChange.current = true;
     setCurrentTrack(localTrack);
     globalClock.reset(0, true);
     setIsPlaying(true);
@@ -431,6 +523,12 @@ export const App: React.FC = () => {
       {/* 2. Top Bar: Pure White Minimal Floating Icons (Dynamic Slights & Fullscreen Only) */}
       <header className="relative z-30 w-full px-6 py-4 flex items-center justify-end pointer-events-none">
         <div className="pointer-events-auto flex items-center gap-3">
+          <button
+            aria-label="Open music library"
+            onClick={() => setIsLibraryOpen(true)}
+            className="rounded-full border border-white/20 bg-white/10 px-3 py-2 text-xs font-semibold text-white transition hover:bg-white/20">
+            <Library className="inline h-4 w-4 mr-1" /> Library
+          </button>
           <a href={window.location.pathname + "?mode=spotify"}
             className="rounded-full border border-emerald-400/30 bg-emerald-500/15 px-3 py-2 text-xs font-semibold text-emerald-200 transition hover:bg-emerald-500/25"
             aria-label="Follow Spotify playback">Follow Spotify</a>
@@ -544,6 +642,10 @@ export const App: React.FC = () => {
           Hotkeys: Space (Play/Pause) • L (Toggle Style) • [ ] (Sync ±50ms) • F (Fullscreen)
         </span>
       </footer>
+
+      <MusicLibraryDrawer open={isLibraryOpen} onClose={() => setIsLibraryOpen(false)}
+        playing={currentTrack} suggestions={DEMO_TRACKS}
+        onPlayTrack={track => { activateLocalTrack(track); setIsLibraryOpen(false); }} />
 
       {/* Settings Modal */}
       <ControlsModal
