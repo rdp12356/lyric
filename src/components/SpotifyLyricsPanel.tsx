@@ -6,6 +6,7 @@ interface Props {
   time: number;
   offsetMs: number;
   fontSize: number;
+  onSeek?: (seconds: number) => void;
 }
 function findLine(lines: LyricsData['lines'], time: number): number {
   let left = 0, right = lines.length - 1, found = -1;
@@ -17,10 +18,13 @@ function findLine(lines: LyricsData['lines'], time: number): number {
   return found;
 }
 const LyricRow = React.memo(function LyricRow({
-  text, active, passed, scale, index
-}: { text: string; active: boolean; passed: boolean; scale: number; index: number }) {
+  text, active, passed, scale, index, lineTime, onSeek
+}: { text: string; active: boolean; passed: boolean; scale: number; index: number; lineTime: number; onSeek?: (seconds: number) => void }) {
   return (
     <p data-line={index} aria-current={active ? 'true' : undefined}
+      role={onSeek ? "button" : undefined} tabIndex={onSeek ? 0 : undefined}
+      onClick={onSeek ? () => onSeek(lineTime) : undefined}
+      onKeyDown={onSeek ? e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onSeek(lineTime); } } : undefined}
       className={'relative mx-auto my-2 rounded-2xl px-4 py-3 leading-relaxed font-semibold transition-[opacity,transform,color] duration-300 ' +
         (active ? 'opacity-100 text-white scale-100' : passed ? 'opacity-45 text-white/70 scale-[0.97]' : 'opacity-30 text-white scale-[0.97]')}
       style={{ fontSize: scale + 'px', transformOrigin: 'center' }}>
@@ -28,7 +32,7 @@ const LyricRow = React.memo(function LyricRow({
     </p>
   );
 });
-export function SpotifyLyricsPanel({ lyrics, time, offsetMs, fontSize }: Props) {
+export function SpotifyLyricsPanel({ lyrics, time, offsetMs, fontSize, onSeek }: Props) {
   const viewport = useRef<HTMLDivElement>(null);
   const [following, setFollowing] = useState(true);
   const reduceMotion = useMemo(() => window.matchMedia('(prefers-reduced-motion: reduce)').matches, []);
@@ -59,7 +63,7 @@ export function SpotifyLyricsPanel({ lyrics, time, offsetMs, fontSize }: Props) 
       style={{ scrollBehavior: reduceMotion ? 'auto' : 'smooth', scrollbarWidth: 'thin' }}>
       <div style={{ height: '34%' }} aria-hidden="true" />
       {lyrics.lines.map((line, i) => <LyricRow key={line.id + ':' + line.time}
-        index={i} text={line.text} active={i === index} passed={i < index} scale={fontSize} />)}
+        index={i} text={line.text} active={i === index} passed={i < index} scale={fontSize} lineTime={line.time} onSeek={onSeek} />)}
       <div style={{ height: '50%' }} aria-hidden="true" />
     </div>
     {!following && <button onClick={() => setFollowing(true)}
