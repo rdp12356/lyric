@@ -32,6 +32,7 @@ jobs:
         run: |
           node tests/web-spotify-auth.cjs
           node tests/web-spotify-playback.cjs
+          node tests/spotify-catalog.cjs
           node tests/lrclib-refresh.cjs
           node tests/lrclib-version-matching.cjs
           node tests/sync-audio.cjs
