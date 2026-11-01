@@ -94,5 +94,14 @@ global.fetch = async (_uri, options) => {
   await assert.rejects(auth.finishSpotifyBrowserCallback(), /verification failed/i);
   assert.equal(tokenCalls.length, 2, 'Reject CSRF attempts before token endpoint');
   assert(!loc.search.includes('code='), 'Failed auth must also clear sensitive code');
+  // Revoked/expired refresh token must clear the browser session.
+  await auth.beginSpotifyBrowserLogin(CLIENT, true);
+  const pendingValid = JSON.parse(sessionStorage.getItem('lyric.web.spotify.pkce'));
+  loc.href = 'https://rdp12356.github.io/lyric/?code=last&state=' + pendingValid.state;
+  loc.search = '?code=last&state=' + pendingValid.state;
+  await auth.finishSpotifyBrowserCallback();
+  issueError = 'invalid_grant';
+  await assert.rejects(auth.getSpotifyBrowserAccessToken(true), /expired or was revoked/i);
+  assert.equal(auth.hasRememberedSpotifySession(), false, 'Invalid grant must clear session');
   console.log('PASS: Pages redirect, PKCE S256, state validation, callback deduplication, token rotation, single-flight refresh and disconnect.');
 })().catch(error => { console.error(error); process.exit(1); });
