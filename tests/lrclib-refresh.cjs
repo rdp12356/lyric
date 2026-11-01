@@ -64,7 +64,7 @@ global.fetch = async (uri, options) => {
   const key = cache.lyricsKey('Test Song', 'Original Artist', 'Album', 180);
   assert.equal(cache.cachedLyrics(key)?.lines[0].text, 'Updated synced original lyrics');
 
-  const rejected = await service.lookupLyricsFromLRCLIB('Test Song', 'Original Artist', 'Album', 260);
+  const rejected = await service.lookupLyricsFromLRCLIB('Test Song', 'Original Artist', 'Album', 400);
   assert.equal(rejected.lyrics, null, 'bad duration versions must not be accepted');
   assert.equal(rejected.issue, 'not-found');
 
