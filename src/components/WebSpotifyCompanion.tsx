@@ -138,10 +138,13 @@ export default function WebSpotifyCompanion() {
         const next = result.playback;
         if (!next) {
           playbackRef.current = null; lastKey.current = '';
+          lyricRequestId.current++; setLyrics(null); setManualResult(false);
           clock.current.reset(0, false); setPlayback(null); setSeconds(0);
         } else {
           const key = next.uri || next.trackId;
           if (key !== lastKey.current) {
+            lyricRequestId.current++; setLyrics(null); setManualResult(false);
+            setLyricsError(''); setCandidates([]);
             clock.current.reset(next.position, next.playing);
             lastKey.current = key;
           } else clock.current.update(next.position, next.playing);
