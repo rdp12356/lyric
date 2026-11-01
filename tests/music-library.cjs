@@ -106,4 +106,16 @@ restored.restoreBackup(backup, false);
 assert.equal(restored.getSnapshot().playlists.length, 1, 'Replace mode honors backup data');
 assert(notifications > 10, 'Subscribers get updates');
 unsubscribe();
-console.log('PASS: secure metadata, queue ordering, next/prev, shuffle/repeat, favorites, playlists, persistence and versioned backups.');
+const ephemeral = {
+  ...sample(8, 'local-file'), id: 'local-ephemeral',
+  audioUrl: 'blob:http://127.0.0.1:5173/temporary-user-file'
+};
+const sessionStore = new MusicLibraryStore();
+sessionStore.playNow(ephemeral);
+const sessionTrack = sessionStore.getSnapshot().queue.find(t => t.id === ephemeral.id);
+assert(sessionTrack);
+assert.equal(sessionTrack.audioUrl, undefined, 'Blob URLs must never enter persisted library metadata');
+assert.equal(canPlaySavedTrack(sessionTrack), true, 'An imported file remains playable within this session');
+assert.equal(playbackTrack(sessionTrack).audioUrl, ephemeral.audioUrl);
+assert(!sessionStore.exportBackup().includes('blob:'), 'Backup must not include temporary local-file URLs');
+console.log('PASS: secure metadata, queue ordering, next/prev, shuffle/repeat, favorites, playlists, session local files, persistence and versioned backups.');
