@@ -383,6 +383,11 @@ export const App: React.FC = () => {
     if (volume > 0) { previousVolume.current = volume; libraryStore.setVolume(0); }
     else libraryStore.setVolume(previousVolume.current || 0.8);
   }, []);
+  const closeLibrary = useCallback(() => setIsLibraryOpen(false), []);
+  const playFromLibrary = useCallback((track: Track) => {
+    handleSelectSearchedTrack(track);
+    setIsLibraryOpen(false);
+  }, [handleSelectSearchedTrack]);
 
   // Publish local-audio metadata and controls to compatible browsers/headsets.
   // Spotify remains external; do not hijack the OS media session for it.
@@ -682,9 +687,8 @@ export const App: React.FC = () => {
         onSelectTrack={handleSelectSearchedTrack}
       />
 
-      <LocalLibraryPanel open={isLibraryOpen} onClose={() => setIsLibraryOpen(false)}
-        nowPlayingId={currentTrack.id}
-        onPlay={track => { handleSelectSearchedTrack(track); setIsLibraryOpen(false); }} />
+      <LocalLibraryPanel open={isLibraryOpen} onClose={closeLibrary}
+        nowPlayingId={currentTrack.id} onPlay={playFromLibrary} />
     </div>
   );
 };
