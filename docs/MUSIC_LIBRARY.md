@@ -22,7 +22,7 @@ The new MusicLibraryDrawer component has tabs for queue, favorites, playlists, h
 Track metadata may contain public song ID, title, artist, album, duration, source, public HTTPS artwork and permitted Apple iTunes preview URLs. This store **never persists OAuth tokens, private keys, audio blobs or external streaming sources**.
 
 - Spotify and external media records are metadata-only. They cannot become local audio sources merely by appearing in a queue or playlist.
-- Local files may play while their object URL is alive. Object URLs **do not survive reload**, so the library marks such files as needing re-import. Actual audio bytes are not backed up.
+- Local files can be replayed from the queue while their temporary object URL remains available **during the same app session**. Object URLs **do not survive reload**, so the library marks those files as needing re-import. The session URL is held only in memory, never in persistent storage or backup JSON; actual audio bytes are not backed up.
 - Only HTTPS Apple iTunes preview URLs or built-in Lyric demo tracks are playable through the saved queue. Preview URLs can expire, and their availability is not guaranteed.
 - The JSON backup includes **only library data**, not audio files, lyric text, Spotify credentials, or user accounts. No background cloud uploads.
 - Imports require schema/version validation, duplicate removal, metadata sanitization and a 4MB maximum. The Import & merge UI does not discard existing local data.
