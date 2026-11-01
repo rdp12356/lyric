@@ -160,6 +160,14 @@ export default function WebSpotifyCompanion() {
         nextDelay = next?.playing ? 2500 : 4500;
       } catch (error) {
         if (cancelled || signal.aborted || generation !== requestId.current) return;
+        // A revoked/expired refresh token is not a transient playback outage.
+        // The auth service clears it on invalid_grant; return to Sign In.
+        if (!hasRememberedSpotifySession()) {
+          setAuthError('Spotify authorization expired or was revoked. Connect your account again.');
+          setPhase('disconnected');
+          setPlayback(null); setLyrics(null); clock.current.reset(0, false);
+          return;
+        }
         failures++;
         nextDelay = Math.min(30000, 1500 * Math.pow(2, Math.min(5, failures)));
         if (error instanceof PlaybackRequestError) {
