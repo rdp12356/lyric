@@ -48,7 +48,16 @@ const TRACK = '6rqhFgbbKwnb9MLmUQDhG6';
     await dialog.getByText('Test Listener').waitFor();
     await dialog.getByText('Practice Mix').click();
     await dialog.getByText('Saved Playlist Song').waitFor();
-    await dialog.getByRole('button', { name: 'Save Saved Playlist Song favorite' }).click();
+    const favorite = dialog.locator('button[aria-label*="Saved Playlist Song favorite"]');
+    try { await favorite.waitFor({ timeout: 4000 }); }
+    catch (error) {
+      console.error('Spotify dialog buttons:', await dialog.locator('button').evaluateAll(nodes =>
+        nodes.map(node => ({ text: node.textContent?.trim(), aria: node.getAttribute('aria-label') }))
+      ));
+      throw error;
+    }
+    const label = await favorite.getAttribute('aria-label');
+    if (label && label.startsWith('Save ')) await favorite.click();
     const favorites = await page.evaluate(() =>
       JSON.parse(localStorage.getItem('lyric.music.library.v1')).favorites);
     assert(favorites.includes('spotify:spotify:track:' + TRACK));
