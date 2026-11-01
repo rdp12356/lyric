@@ -15,7 +15,7 @@ The store contains:
 - Version-1 backup and restore, with a merge-by-ID default.
 - Sanitation and size/entry limits for imported JSON.
 
-The new MusicLibraryDrawer component has tabs for queue, favorites, playlists, history and backups and is accessible from the **Library** control in the original web player. It uses the same Lyric visual palette and does not replace other UI components.
+The new MusicLibraryDrawer component has tabs for queue, favorites, playlists, history and backups and is accessible from the **Library** control in both the original web player and Spotify browser companion. In the Spotify companion it is metadata-only: users can save external tracks to playlists, favorites or history without switching audio sources. It uses the same Lyric visual palette and does not replace other UI components.
 
 ## Data handling
 
@@ -41,6 +41,7 @@ The Web Media Session API supplies supported browsers with Lyric's actual playin
 
 ## Limitations / next phases
 
+- Browser Spotify companion now records current Spotify track metadata in Recent and exposes Favorite and Library controls. The Spotify connection remains read-only unless the user separately authorizes playback controls.
 - AndroidApp.tsx has an existing independent *runtime* queue for local files. Consolidating its queue with the shared library needs careful physical-device testing so Spotify App Remote and Android MediaSession remain authoritative. This PR currently integrates the new library panel into the **original web player only**.
 - Spotify playlists, recommendations and profile access require separate authorized scopes and Spotify developer access; this store does not fetch or scrape them.
 - A persistent local-file library requires IndexedDB/File System Access API or a native Android content-URI/SQLite layer, with explicit file permissions and availability checks.
