@@ -10,7 +10,7 @@ import type { Track } from '../types';
 interface Props { open: boolean; onClose(): void; }
 const button = 'rounded-xl border border-white/15 bg-white/10 px-3 py-2 text-xs text-white transition hover:bg-white/20 disabled:opacity-40';
 function message(error: unknown) { return error instanceof Error ? error.message : 'Spotify library is temporarily unavailable.'; }
-export function SpotifyCatalogPanel({ open, onClose }: Props) {
+function SpotifyCatalogPanelComponent({ open, onClose }: Props) {
   const [profile, setProfile] = useState<SpotifyProfile | null>(null);
   const [playlists, setPlaylists] = useState<SpotifyPlaylist[]>([]);
   const [selected, setSelected] = useState<SpotifyPlaylist | null>(null);
@@ -139,3 +139,6 @@ export function SpotifyCatalogPanel({ open, onClose }: Props) {
     </section>
   </div>;
 }
+
+// Playing time changes should not rebuild the modal's playlist rows.
+export const SpotifyCatalogPanel = React.memo(SpotifyCatalogPanelComponent);
