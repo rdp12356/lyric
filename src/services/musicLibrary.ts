@@ -230,6 +230,13 @@ export class MusicLibraryStore {
       : s.queue[at - 1] || (s.repeat === 'all' ? s.queue[s.queue.length - 1] : undefined);
     return previous ? this.playNow(previous) : null;
   }
+  /** Remember externally playing Spotify/Android tracks without queueing audio. */
+  rememberTrack(input: Track | SavedTrack) {
+    const track = sanitizeTrack(input);
+    if (!track) return;
+    if (this.state.recent[0]?.id === track.id) return;
+    this.update(s => ({ ...s, recent: addUnique(s.recent, track, 80) }));
+  }
   isFavorite(id: string): boolean { return this.state.favorites.some(t => t.id === id); }
   toggleFavorite(input: Track | SavedTrack) {
     const track = sanitizeTrack(input);
